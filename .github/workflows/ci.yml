@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with csc
+        shell: cmd
+        run: build.bat
+
+      - name: Verify artifact
+        shell: powershell
+        run: |
+          if (-not (Test-Path .\whale-sitter.exe)) { throw "build failed: exe missing" }
+          Write-Host "OK: $((Get-Item .\whale-sitter.exe).Length) bytes"

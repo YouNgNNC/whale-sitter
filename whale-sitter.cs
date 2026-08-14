@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -18,7 +17,7 @@ namespace WhaleSitter
 {
     internal static class Program
     {
-        public const string Version = "1.0.0";
+        public const string Version = "2.1.0";
 
         [STAThread]
         private static void Main()
@@ -28,14 +27,61 @@ namespace WhaleSitter
             {
                 if (!createdNew)
                 {
-                    MessageBox.Show("监控台已在运行，请查看系统托盘的鲸鱼图标。", "whale-sitter",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(L.Get("监控台已在运行，请查看系统托盘的鲸鱼图标。",
+                        "Monitor already running. See the whale icon in the system tray."),
+                        "whale-sitter", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new MainForm());
             }
+        }
+    }
+
+    internal static class L
+    {
+        private static bool en;
+        public static bool IsEn { get { return en; } }
+        public static void Set(bool english) { en = english; }
+        public static string Get(string zh, string enText) { return en ? enText : zh; }
+    }
+
+    internal static class Settings
+    {
+        private const string KeyPath = @"Software\whale-sitter";
+        public static int Lang;   // 0 auto, 1 zh, 2 en
+        public static int Theme;  // 0 auto, 1 light, 2 dark
+        public static int Port = 3080;
+
+        public static void Load()
+        {
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(KeyPath, false))
+                {
+                    if (k == null) return;
+                    object v;
+                    v = k.GetValue("Lang"); if (v != null) Lang = Convert.ToInt32(v);
+                    v = k.GetValue("Theme"); if (v != null) Theme = Convert.ToInt32(v);
+                    v = k.GetValue("Port"); if (v != null) Port = Convert.ToInt32(v);
+                }
+            }
+            catch { }
+        }
+
+        public static void Save()
+        {
+            try
+            {
+                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(KeyPath))
+                {
+                    k.SetValue("Lang", Lang);
+                    k.SetValue("Theme", Theme);
+                    k.SetValue("Port", Port);
+                }
+            }
+            catch { }
         }
     }
 
@@ -132,8 +178,7 @@ namespace WhaleSitter
 
     internal class MainForm : Form
     {
-        private const int Port = 3080;
-        private static readonly string Url = "http://127.0.0.1:" + Port + "/";
+        private static readonly string UrlBase = "http://127.0.0.1:";
         private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string RunValueName = "whale-sitter";
         private const int WmSettingChange = 0x001A;
@@ -176,6 +221,7 @@ namespace WhaleSitter
         private readonly Button openBtn = new Button();
         private readonly Button logBtn = new Button();
         private readonly Button diagBtn = new Button();
+        private readonly Button settingsBtn = new Button();
         private readonly Label hint = new Label();
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer();
@@ -186,12 +232,27 @@ namespace WhaleSitter
         private bool running;
         private bool pulseOn;
         private bool installInProgress;
+        private int lastPort;
         private Palette pal;
 
         public MainForm()
         {
+            Settings.Load();
+            ApplyLanguage();
+            lastPort = Settings.Port;
             InitUi();
             InitTray();
+        }
+
+        private static void ApplyLanguage()
+        {
+            if (Settings.Lang == 1) L.Set(false);
+            else if (Settings.Lang == 2) L.Set(true);
+            else
+            {
+                try { L.Set(System.Globalization.CultureInfo.InstalledUICulture.TwoLetterISOLanguageName != "zh"); }
+                catch { L.Set(false); }
+            }
         }
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -233,7 +294,7 @@ namespace WhaleSitter
 
         private static bool NodeAvailable()
         {
-            return PortableNodeDir != null || NodeVersionText() != "未检测到";
+            return PortableNodeDir != null || NodeVersionText() != L.Get("未检测到", "not found");
         }
 
         private static string NodeVersionText()
@@ -247,9 +308,9 @@ namespace WhaleSitter
                 Process p = Process.Start(psi);
                 string v = p.StandardOutput.ReadToEnd().Trim();
                 p.WaitForExit(3000);
-                return v.Length > 0 ? v : "未检测到";
+                return v.Length > 0 ? v : L.Get("未检测到", "not found");
             }
-            catch { return "未检测到"; }
+            catch { return L.Get("未检测到", "not found"); }
         }
 
         private static bool DshInstalled()
@@ -273,6 +334,13 @@ namespace WhaleSitter
             }
             catch { }
             return true;
+        }
+
+        private bool ResolveDark()
+        {
+            if (Settings.Theme == 1) return false;
+            if (Settings.Theme == 2) return true;
+            return !SystemUsesLightTheme();
         }
 
         private static bool AutoStartEnabled()
@@ -343,10 +411,9 @@ namespace WhaleSitter
 
         private void InitUi()
         {
-            Text = "whale-sitter · DeepSeek Harness 监控台";
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
-            ClientSize = new Size(404, 268);
+            ClientSize = new Size(480, 268);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Microsoft YaHei UI", 10F);
             DoubleBuffered = true;
@@ -369,25 +436,22 @@ namespace WhaleSitter
             title.Location = new Point(64, 14);
             title.AutoSize = true;
 
-            subtitle.Text = "DeepSeek Harness 监控台 · v" + Program.Version;
             subtitle.Font = new Font(Font.FontFamily, 9F);
             subtitle.Location = new Point(66, 40);
             subtitle.AutoSize = true;
 
             card.Location = new Point(16, 64);
-            card.Size = new Size(372, 62);
+            card.Size = new Size(448, 62);
 
             dot.Text = "●";
             dot.Font = new Font(Font.FontFamily, 14F, FontStyle.Bold);
             dot.Location = new Point(24, 19);
             dot.AutoSize = true;
 
-            status.Text = "检测中…";
             status.Font = new Font(Font.FontFamily, 11F, FontStyle.Bold);
             status.Location = new Point(52, 16);
             status.AutoSize = true;
 
-            statusHint.Text = "Web UI  http://127.0.0.1:" + Port;
             statusHint.Font = new Font(Font.FontFamily, 8.5F);
             statusHint.Location = new Point(52, 38);
             statusHint.AutoSize = true;
@@ -397,12 +461,12 @@ namespace WhaleSitter
             card.Controls.Add(statusHint);
 
             toggle.Location = new Point(16, 136);
-            toggle.Size = new Size(372, 54);
+            toggle.Size = new Size(448, 54);
             toggle.Font = new Font(Font.FontFamily, 15F, FontStyle.Bold);
             toggle.Cursor = Cursors.Hand;
             toggle.Click += delegate { ToggleMain(); };
 
-            autoStartBtn.Size = new Size(104, 30);
+            autoStartBtn.Size = new Size(100, 30);
             autoStartBtn.Location = new Point(16, 202);
             autoStartBtn.FlatStyle = FlatStyle.Flat;
             autoStartBtn.FlatAppearance.BorderSize = 0;
@@ -411,33 +475,37 @@ namespace WhaleSitter
             autoStartBtn.Click += delegate { SetAutoStart(!AutoStartEnabled()); };
 
             openBtn.Size = new Size(80, 30);
-            openBtn.Location = new Point(128, 202);
+            openBtn.Location = new Point(124, 202);
             openBtn.FlatStyle = FlatStyle.Flat;
             openBtn.FlatAppearance.BorderSize = 0;
             openBtn.Font = new Font(Font.FontFamily, 9F);
             openBtn.Cursor = Cursors.Hand;
-            openBtn.Text = "打开界面";
-            openBtn.Click += delegate { try { Process.Start(Url); } catch { } };
+            openBtn.Click += delegate { try { Process.Start(UrlBase + Settings.Port + "/"); } catch { } };
 
             logBtn.Size = new Size(80, 30);
-            logBtn.Location = new Point(216, 202);
+            logBtn.Location = new Point(212, 202);
             logBtn.FlatStyle = FlatStyle.Flat;
             logBtn.FlatAppearance.BorderSize = 0;
             logBtn.Font = new Font(Font.FontFamily, 9F);
             logBtn.Cursor = Cursors.Hand;
-            logBtn.Text = "查看日志";
             logBtn.Click += delegate { OpenLog(); };
 
             diagBtn.Size = new Size(80, 30);
-            diagBtn.Location = new Point(304, 202);
+            diagBtn.Location = new Point(300, 202);
             diagBtn.FlatStyle = FlatStyle.Flat;
             diagBtn.FlatAppearance.BorderSize = 0;
             diagBtn.Font = new Font(Font.FontFamily, 9F);
             diagBtn.Cursor = Cursors.Hand;
-            diagBtn.Text = "一键诊断";
             diagBtn.Click += delegate { OpenDiagnostics(); };
 
-            hint.Text = "✕ 关闭 = 最小化到托盘";
+            settingsBtn.Size = new Size(80, 30);
+            settingsBtn.Location = new Point(388, 202);
+            settingsBtn.FlatStyle = FlatStyle.Flat;
+            settingsBtn.FlatAppearance.BorderSize = 0;
+            settingsBtn.Font = new Font(Font.FontFamily, 9F);
+            settingsBtn.Cursor = Cursors.Hand;
+            settingsBtn.Click += delegate { OpenSettings(); };
+
             hint.Font = new Font(Font.FontFamily, 8F);
             hint.Location = new Point(16, 240);
             hint.AutoSize = true;
@@ -451,34 +519,68 @@ namespace WhaleSitter
             Controls.Add(openBtn);
             Controls.Add(logBtn);
             Controls.Add(diagBtn);
+            Controls.Add(settingsBtn);
             Controls.Add(hint);
 
-            ApplyTheme(SystemUsesLightTheme());
+            ApplyStrings();
+            ApplyTheme(ResolveDark());
         }
+
+        private void ApplyStrings()
+        {
+            Text = L.Get("whale-sitter · DeepSeek Harness 监控台", "whale-sitter · DeepSeek Harness Monitor");
+            subtitle.Text = L.Get("DeepSeek Harness 监控台 · v", "DeepSeek Harness Monitor · v") + Program.Version;
+            openBtn.Text = L.Get("打开界面", "Open UI");
+            logBtn.Text = L.Get("查看日志", "View Log");
+            diagBtn.Text = L.Get("一键诊断", "Diagnose");
+            settingsBtn.Text = L.Get("设置", "Settings");
+            hint.Text = L.Get("✕ 关闭 = 最小化到托盘", "✕ Close = minimize to tray");
+            UpdateAutoStartButton();
+            UpdateStatusUi();
+            UpdateTrayMenu();
+        }
+
+        private ContextMenuStrip trayMenu;
 
         private void InitTray()
         {
-            tray.Text = "whale-sitter - 检测中…";
+            tray.Text = "whale-sitter";
             try { tray.Icon = new Icon(IcoPath); }
             catch { tray.Icon = SystemIcons.Application; }
             tray.Visible = true;
             tray.DoubleClick += delegate { ShowWindow(); };
 
-            ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("打开监控台", null, delegate { ShowWindow(); });
-            menu.Items.Add("打开界面", null, delegate { try { Process.Start(Url); } catch { } });
-            menu.Items.Add("查看日志", null, delegate { OpenLog(); });
-            menu.Items.Add("一键诊断", null, delegate { OpenDiagnostics(); });
-            menu.Items.Add("启动服务", null, delegate { StartServer(); });
-            menu.Items.Add("停止服务", null, delegate { StopServer(); });
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出", null, delegate
+            trayMenu = new ContextMenuStrip();
+            trayMenu.Items.Add("", null, delegate { ShowWindow(); });
+            trayMenu.Items.Add("", null, delegate { try { Process.Start(UrlBase + Settings.Port + "/"); } catch { } });
+            trayMenu.Items.Add("", null, delegate { OpenLog(); });
+            trayMenu.Items.Add("", null, delegate { OpenDiagnostics(); });
+            trayMenu.Items.Add("", null, delegate { OpenSettings(); });
+            trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add("", null, delegate { StartServer(); });
+            trayMenu.Items.Add("", null, delegate { StopServer(); });
+            trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add("", null, delegate
             {
                 realExit = true;
                 tray.Visible = false;
                 Application.Exit();
             });
-            tray.ContextMenuStrip = menu;
+            tray.ContextMenuStrip = trayMenu;
+            UpdateTrayMenu();
+        }
+
+        private void UpdateTrayMenu()
+        {
+            if (trayMenu == null || trayMenu.Items.Count < 10) return;
+            trayMenu.Items[0].Text = L.Get("打开监控台", "Open Monitor");
+            trayMenu.Items[1].Text = L.Get("打开界面", "Open UI");
+            trayMenu.Items[2].Text = L.Get("查看日志", "View Log");
+            trayMenu.Items[3].Text = L.Get("一键诊断", "Diagnose");
+            trayMenu.Items[4].Text = L.Get("设置", "Settings");
+            trayMenu.Items[6].Text = L.Get("启动服务", "Start Service");
+            trayMenu.Items[7].Text = L.Get("停止服务", "Stop Service");
+            trayMenu.Items[9].Text = L.Get("退出", "Exit");
         }
 
         private void OpenLog()
@@ -486,8 +588,8 @@ namespace WhaleSitter
             try
             {
                 if (File.Exists(LogPath)) Process.Start("notepad.exe", "\"" + LogPath + "\"");
-                else MessageBox.Show("日志文件还不存在：\n" + LogPath, "whale-sitter",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else MessageBox.Show(L.Get("日志文件还不存在：\n", "Log file not found:\n") + LogPath,
+                    "whale-sitter", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch { }
         }
@@ -503,7 +605,7 @@ namespace WhaleSitter
             base.WndProc(ref m);
             if (m.Msg == WmSettingChange)
             {
-                bool dark = !SystemUsesLightTheme();
+                bool dark = ResolveDark();
                 if (dark != pal.Dark) ApplyTheme(dark);
             }
         }
@@ -524,7 +626,7 @@ namespace WhaleSitter
             UpdateStatusUi();
             UpdateAutoStartButton();
 
-            foreach (Control c in new Control[] { autoStartBtn, openBtn, logBtn, diagBtn })
+            foreach (Control c in new Control[] { autoStartBtn, openBtn, logBtn, diagBtn, settingsBtn })
             {
                 c.BackColor = pal.BtnBg;
                 c.ForeColor = pal.BtnText;
@@ -547,7 +649,7 @@ namespace WhaleSitter
         private void UpdateAutoStartButton()
         {
             bool on = AutoStartEnabled();
-            autoStartBtn.Text = "开机自启：" + (on ? "开" : "关");
+            autoStartBtn.Text = L.Get("开机自启：", "Auto-start: ") + (on ? L.Get("开", "On") : L.Get("关", "Off"));
             autoStartBtn.BackColor = on ? pal.Accent : pal.BtnBg;
             autoStartBtn.ForeColor = on ? Color.White : pal.BtnText;
         }
@@ -564,19 +666,19 @@ namespace WhaleSitter
             {
                 dot.ForeColor = pal.Warn;
                 status.ForeColor = pal.Warn;
-                status.Text = "安装中…";
+                status.Text = L.Get("安装中…", "Installing…");
                 toggle.SetColors(pal.Warn, Color.White);
-                toggle.Text = "安装中，请稍候…";
+                toggle.Text = L.Get("安装中，请稍候…", "Installing, please wait…");
                 return;
             }
 
             if (starting)
             {
-                status.Text = "启动中…";
+                status.Text = L.Get("启动中…", "Starting…");
                 dot.ForeColor = pal.Warn;
                 status.ForeColor = pal.Warn;
                 toggle.SetColors(pal.Warn, Color.White);
-                toggle.Text = "启动中…";
+                toggle.Text = L.Get("启动中…", "Starting…");
                 return;
             }
 
@@ -584,10 +686,10 @@ namespace WhaleSitter
             {
                 dot.ForeColor = pal.Danger;
                 status.ForeColor = pal.Danger;
-                status.Text = "缺少 Node.js";
-                statusHint.Text = "点下方按钮自动安装运行环境";
+                status.Text = L.Get("缺少 Node.js", "Node.js not found");
+                statusHint.Text = L.Get("点下方按钮自动安装运行环境", "Click the button below to auto-install");
                 toggle.SetColors(pal.Accent, Color.White);
-                toggle.Text = "一键安装 Node.js + dsh";
+                toggle.Text = L.Get("一键安装 Node.js + dsh", "Install Node.js + dsh");
                 return;
             }
 
@@ -595,35 +697,35 @@ namespace WhaleSitter
             {
                 dot.ForeColor = pal.Warn;
                 status.ForeColor = pal.Warn;
-                status.Text = "未安装 dsh";
-                statusHint.Text = "点下方按钮一键安装 DeepSeek Harness";
+                status.Text = L.Get("未安装 dsh", "dsh not installed");
+                statusHint.Text = L.Get("点下方按钮一键安装 DeepSeek Harness", "Click below to install DeepSeek Harness");
                 toggle.SetColors(pal.Accent, Color.White);
-                toggle.Text = "一键安装 DeepSeek Harness";
+                toggle.Text = L.Get("一键安装 DeepSeek Harness", "Install DeepSeek Harness");
                 return;
             }
 
-            statusHint.Text = "Web UI  http://127.0.0.1:" + Port;
+            statusHint.Text = L.Get("Web UI  http://127.0.0.1:", "Web UI  http://127.0.0.1:") + Settings.Port;
             if (running)
             {
                 dot.ForeColor = pulseOn ? pal.Success : pal.SuccessDim;
                 status.ForeColor = pal.Success;
-                status.Text = "运行中 · PID " + runningPidText();
+                status.Text = L.Get("运行中 · PID ", "Running · PID ") + runningPidText();
                 toggle.SetColors(pal.Success, Color.White);
-                toggle.Text = "点击停止服务";
+                toggle.Text = L.Get("点击停止服务", "Click to stop");
             }
             else
             {
                 dot.ForeColor = pal.Danger;
                 status.ForeColor = pal.TextDim;
-                status.Text = "已停止";
+                status.Text = L.Get("已停止", "Stopped");
                 toggle.SetColors(pal.BtnBg, pal.BtnText);
-                toggle.Text = "点击启动服务";
+                toggle.Text = L.Get("点击启动服务", "Click to start");
             }
         }
 
         private string runningPidText()
         {
-            int pid = FindPidByPort(Port);
+            int pid = FindPidByPort(Settings.Port);
             return pid > 0 ? pid.ToString() : "?";
         }
 
@@ -661,7 +763,8 @@ namespace WhaleSitter
                 e.Cancel = true;
                 Hide();
                 tray.ShowBalloonTip(1500, "whale-sitter",
-                    "已最小化到系统托盘，双击鲸鱼图标即可恢复面板。", ToolTipIcon.Info);
+                    L.Get("已最小化到系统托盘，双击鲸鱼图标即可恢复面板。",
+                        "Minimized to tray. Double-click the whale icon to restore."), ToolTipIcon.Info);
                 return;
             }
             pollTimer.Stop();
@@ -699,26 +802,28 @@ namespace WhaleSitter
                 string nodeDir = PortableNodeDir;
                 if (nodeDir == null)
                 {
-                    SetInstallUi("正在下载 Node.js…");
+                    SetInstallUi(L.Get("正在下载 Node.js…", "Downloading Node.js…"));
                     AppendLog("开始安装：下载 Node.js");
                     nodeDir = await InstallNodeAsync();
                 }
 
-                SetInstallUi("正在安装 DeepSeek Harness（可能需要几分钟）…");
+                SetInstallUi(L.Get("正在安装 DeepSeek Harness（可能需要几分钟）…",
+                    "Installing DeepSeek Harness (may take a few minutes)…"));
                 AppendLog("开始安装：npm install -g @deepseek-ai/dsh");
                 await InstallDshAsync(nodeDir);
 
                 PortableNodeDir = FindPortableNodeDir();
                 UpdateStatus();
-                SetInstallUi("安装完成，正在启动服务…");
+                SetInstallUi(L.Get("安装完成，正在启动服务…", "Installed. Starting service…"));
                 if (!DshInstalled())
-                    throw new Exception("dsh 安装后仍未检测到，请查看日志或使用一键诊断。");
+                    throw new Exception(L.Get("dsh 安装后仍未检测到，请查看日志或使用一键诊断。",
+                        "dsh still not detected after install. Check the log or use Diagnose."));
                 if (!running) StartServer();
-                status.Text = "安装完成";
+                status.Text = L.Get("安装完成", "Install complete");
             }
             catch (Exception ex)
             {
-                status.Text = "安装失败";
+                status.Text = L.Get("安装失败", "Install failed");
                 statusHint.Text = ex.Message;
                 AppendLog("安装失败: " + ex);
             }
@@ -764,7 +869,8 @@ namespace WhaleSitter
                 }
 
                 if (zipUrl == null)
-                    throw new Exception("无法获取 Node.js 下载地址（网络问题？），请检查网络后重试。");
+                    throw new Exception(L.Get("无法获取 Node.js 下载地址（网络问题？），请检查网络后重试。",
+                        "Cannot resolve Node.js download URL (network issue?). Check your network and retry."));
 
                 string tmpZip = Path.Combine(Path.GetTempPath(), fileName);
                 string extractRoot = Path.Combine(LocalDataDir, "node");
@@ -786,7 +892,8 @@ namespace WhaleSitter
                 try { File.Delete(tmpZip); } catch { }
 
                 if (nodeDir == null)
-                    throw new Exception("Node.js 解压后未找到 node.exe，请重试。");
+                    throw new Exception(L.Get("Node.js 解压后未找到 node.exe，请重试。",
+                        "node.exe not found after extracting Node.js. Retry."));
                 return nodeDir;
             });
         }
@@ -797,7 +904,7 @@ namespace WhaleSitter
             {
                 string npmCli = Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js");
                 if (!File.Exists(npmCli))
-                    throw new Exception("未找到 npm（" + npmCli + "），安装不完整。");
+                    throw new Exception(L.Get("未找到 npm（", "npm not found (") + npmCli + "），安装不完整。");
 
                 ProcessStartInfo psi = new ProcessStartInfo(
                     Path.Combine(nodeDir, "node.exe"),
@@ -817,7 +924,8 @@ namespace WhaleSitter
                     try { File.AppendAllText(LogPath, output + Environment.NewLine); } catch { }
                 }
                 if (p.ExitCode != 0)
-                    throw new Exception("npm 安装失败（exit " + p.ExitCode + "），详见日志。");
+                    throw new Exception(L.Get("npm 安装失败（exit ", "npm install failed (exit ") +
+                        p.ExitCode + "），详见日志。");
             });
         }
 
@@ -826,11 +934,12 @@ namespace WhaleSitter
             if (running || starting || installInProgress) return;
             if (!NodeAvailable() || !DshInstalled()) return;
             starting = true;
-            status.Text = "启动中…";
-            toggle.Text = "启动中…";
+            status.Text = L.Get("启动中…", "Starting…");
+            toggle.Text = L.Get("启动中…", "Starting…");
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo(NodeExe, "\"" + DshEntry + "\" web");
+                ProcessStartInfo psi = new ProcessStartInfo(NodeExe,
+                    "\"" + DshEntry + "\" web --port " + Settings.Port);
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.WorkingDirectory = NpmDir;
@@ -851,7 +960,7 @@ namespace WhaleSitter
             catch (Exception ex)
             {
                 starting = false;
-                status.Text = "启动失败：" + ex.Message;
+                status.Text = L.Get("启动失败：", "Start failed: ") + ex.Message;
                 AppendLog("启动失败: " + ex.Message);
             }
         }
@@ -859,9 +968,9 @@ namespace WhaleSitter
         private void StopServer()
         {
             if (!running && (serverProc == null || serverProc.HasExited)) return;
-            status.Text = "正在停止…";
-            toggle.Text = "正在停止…";
-            int pid = FindPidByPort(Port);
+            status.Text = L.Get("正在停止…", "Stopping…");
+            toggle.Text = L.Get("正在停止…", "Stopping…");
+            int pid = FindPidByPort(Settings.Port);
             try
             {
                 if (pid > 0)
@@ -880,7 +989,7 @@ namespace WhaleSitter
 
         private void UpdateStatus()
         {
-            int pid = FindPidByPort(Port);
+            int pid = FindPidByPort(Settings.Port);
             running = pid > 0;
             starting = false;
             UpdateStatusUi();
@@ -915,19 +1024,54 @@ namespace WhaleSitter
             return -1;
         }
 
+        private void OpenSettings()
+        {
+            using (SettingsForm f = new SettingsForm(pal))
+            {
+                if (f.ShowDialog(this) == DialogResult.OK)
+                {
+                    bool langChanged = f.Lang != Settings.Lang;
+                    int oldPort = Settings.Port;
+                    bool portChanged = f.Port != oldPort;
+                    Settings.Lang = f.Lang;
+                    Settings.Theme = f.Theme;
+                    Settings.Port = f.Port;
+                    Settings.Save();
+
+                    if (langChanged)
+                    {
+                        ApplyLanguage();
+                        ApplyStrings();
+                    }
+
+                    ApplyTheme(ResolveDark());
+
+                    if (portChanged)
+                    {
+                        lastPort = Settings.Port;
+                        bool wasRunning = running;
+                        if (wasRunning) StopServer();
+                        SetInstallUi(L.Get("端口已修改，服务将重启。", "Port changed, service will restart."));
+                        UpdateStatusUi();
+                        if (wasRunning) StartServer();
+                    }
+                }
+            }
+        }
+
         private void OpenDiagnostics()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("whale-sitter v" + Program.Version + " 诊断报告");
-            sb.AppendLine("生成时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendLine("whale-sitter v" + Program.Version + L.Get(" 诊断报告", " Diagnostics Report"));
+            sb.AppendLine(L.Get("生成时间", "Generated") + ": " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             sb.AppendLine("OS: " + Environment.OSVersion + " (" + (Environment.Is64BitOperatingSystem ? "x64" : "x86") + ")");
             sb.AppendLine("Node: " + NodeVersionText());
-            sb.AppendLine("npm 目录: " + NpmDir);
-            sb.AppendLine("dsh 入口: " + (File.Exists(DshEntry) ? DshEntry : "未安装"));
-            int pid = FindPidByPort(Port);
-            sb.AppendLine("端口 " + Port + ": " + (pid > 0 ? "运行中 (PID " + pid + ")" : "空闲"));
-            sb.AppendLine("HTTP " + Url + ": " + HttpStatusText());
-            sb.AppendLine("--- dsh-web.log 末尾 ---");
+            sb.AppendLine(L.Get("npm 目录", "npm dir") + ": " + NpmDir);
+            sb.AppendLine(L.Get("dsh 入口", "dsh entry") + ": " + (File.Exists(DshEntry) ? DshEntry : L.Get("未安装", "not installed")));
+            int pid = FindPidByPort(Settings.Port);
+            sb.AppendLine(L.Get("端口 ", "Port ") + Settings.Port + ": " + (pid > 0 ? L.Get("运行中 (PID ", "Running (PID ") + pid + ")" : L.Get("空闲", "free")));
+            sb.AppendLine("HTTP " + UrlBase + Settings.Port + "/: " + HttpStatusText());
+            sb.AppendLine(L.Get("--- dsh-web.log 末尾 ---", "--- dsh-web.log tail ---"));
             try
             {
                 if (File.Exists(LogPath))
@@ -936,9 +1080,9 @@ namespace WhaleSitter
                     for (int i = Math.Max(0, lines.Length - 20); i < lines.Length; i++)
                         sb.AppendLine(lines[i]);
                 }
-                else sb.AppendLine("(日志文件不存在)");
+                else sb.AppendLine(L.Get("(日志文件不存在)", "(log file missing)"));
             }
-            catch (Exception ex) { sb.AppendLine("(读取日志失败: " + ex.Message + ")"); }
+            catch (Exception ex) { sb.AppendLine(L.Get("(读取日志失败: ", "(failed to read log: ") + ex.Message + ")"); }
 
             ShowReportDialog(sb.ToString());
         }
@@ -947,7 +1091,7 @@ namespace WhaleSitter
         {
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(Url);
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(UrlBase + Settings.Port + "/");
                 req.Method = "GET";
                 req.Timeout = 2000;
                 using (HttpWebResponse res = (HttpWebResponse)req.GetResponse())
@@ -955,13 +1099,13 @@ namespace WhaleSitter
                     return ((int)res.StatusCode).ToString();
                 }
             }
-            catch (Exception ex) { return "连接失败 (" + ex.Message + ")"; }
+            catch (Exception ex) { return L.Get("连接失败 (", "Connection failed (") + ex.Message + ")"; }
         }
 
         private void ShowReportDialog(string report)
         {
             Form f = new Form();
-            f.Text = "一键诊断报告";
+            f.Text = L.Get("一键诊断报告", "Diagnostics Report");
             f.StartPosition = FormStartPosition.CenterParent;
             f.ClientSize = new Size(560, 400);
             f.MinimumSize = new Size(420, 300);
@@ -981,7 +1125,7 @@ namespace WhaleSitter
             box.BorderStyle = BorderStyle.None;
 
             Button copy = new Button();
-            copy.Text = "复制报告";
+            copy.Text = L.Get("复制报告", "Copy Report");
             copy.FlatStyle = FlatStyle.Flat;
             copy.BackColor = pal.Accent;
             copy.ForeColor = Color.White;
@@ -989,7 +1133,12 @@ namespace WhaleSitter
             copy.Height = 36;
             copy.Click += delegate
             {
-                try { Clipboard.SetText(report); MessageBox.Show("已复制到剪贴板，可直接粘贴到 GitHub issue 求助。", "whale-sitter"); }
+                try
+                {
+                    Clipboard.SetText(report);
+                    MessageBox.Show(L.Get("已复制到剪贴板，可直接粘贴到 GitHub issue 求助。",
+                        "Copied to clipboard. Paste into a GitHub issue for help."), "whale-sitter");
+                }
                 catch { }
             };
 
@@ -1009,6 +1158,102 @@ namespace WhaleSitter
                 }
                 catch { }
             }
+        }
+    }
+
+    internal class SettingsForm : Form
+    {
+        public int Lang;
+        public int Theme;
+        public int Port;
+
+        private readonly ComboBox langBox = new ComboBox();
+        private readonly ComboBox themeBox = new ComboBox();
+        private readonly NumericUpDown portBox = new NumericUpDown();
+        private Palette pal;
+
+        public SettingsForm(Palette p)
+        {
+            pal = p;
+            Lang = Settings.Lang;
+            Theme = Settings.Theme;
+            Port = Settings.Port;
+            InitUi();
+        }
+
+        private void InitUi()
+        {
+            Text = L.Get("设置", "Settings");
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(340, 190);
+            BackColor = pal.WindowBg;
+            ForeColor = pal.Text;
+            Font = new Font("Microsoft YaHei UI", 10F);
+
+            AddRow(0, L.Get("语言", "Language"), langBox,
+                new string[] { L.Get("跟随系统", "System"), L.Get("中文", "Chinese"), "English" }, Lang);
+            AddRow(1, L.Get("主题", "Theme"), themeBox,
+                new string[] { L.Get("跟随系统", "System"), L.Get("浅色", "Light"), L.Get("深色", "Dark") }, Theme);
+
+            Label portLabel = new Label();
+            portLabel.Text = L.Get("服务端口", "Server port");
+            portLabel.Location = new Point(24, 96);
+            portLabel.AutoSize = true;
+
+            portBox.Location = new Point(150, 92);
+            portBox.Size = new Size(120, 24);
+            portBox.Minimum = 1024;
+            portBox.Maximum = 65535;
+            portBox.Value = Math.Max(1024, Math.Min(65535, Port));
+
+            Button ok = new Button();
+            ok.Text = L.Get("确定", "OK");
+            ok.FlatStyle = FlatStyle.Flat;
+            ok.BackColor = pal.Accent;
+            ok.ForeColor = Color.White;
+            ok.Size = new Size(120, 32);
+            ok.Location = new Point(90, 140);
+            ok.Click += delegate
+            {
+                Lang = langBox.SelectedIndex < 0 ? 0 : langBox.SelectedIndex;
+                Theme = themeBox.SelectedIndex < 0 ? 0 : themeBox.SelectedIndex;
+                Port = (int)portBox.Value;
+                DialogResult = DialogResult.OK;
+            };
+
+            Button cancel = new Button();
+            cancel.Text = L.Get("取消", "Cancel");
+            cancel.FlatStyle = FlatStyle.Flat;
+            cancel.BackColor = pal.BtnBg;
+            cancel.ForeColor = pal.BtnText;
+            cancel.Size = new Size(120, 32);
+            cancel.Location = new Point(220, 140);
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; };
+
+            Controls.Add(portLabel);
+            Controls.Add(portBox);
+            Controls.Add(ok);
+            Controls.Add(cancel);
+        }
+
+        private void AddRow(int row, string label, ComboBox box, string[] items, int selected)
+        {
+            Label l = new Label();
+            l.Text = label;
+            l.Location = new Point(24, 16 + row * 44);
+            l.AutoSize = true;
+
+            box.Items.AddRange(items);
+            box.SelectedIndex = Math.Max(0, Math.Min(items.Length - 1, selected));
+            box.Location = new Point(150, 12 + row * 44);
+            box.Size = new Size(150, 24);
+            box.DropDownStyle = ComboBoxStyle.DropDownList;
+
+            Controls.Add(l);
+            Controls.Add(box);
         }
     }
 }

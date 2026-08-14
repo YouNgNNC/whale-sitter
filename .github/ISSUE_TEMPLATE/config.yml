@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: DeepSeek Harness (dsh)
+    url: https://github.com/deepseek-ai/deepseek-harness
+    about: whale-sitter 是 dsh 的辅助小工具，dsh 本身的问题请到官方仓库反馈
