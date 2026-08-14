@@ -47,12 +47,16 @@
 - ⏰ **开机自启开关**（HKCU Run 键，免管理员）
 - 📂 **打开界面 / 查看日志**按钮
 
-### v2.1 —— 规划（发布闭环，让"别人真正能用"）
+### v2.1 —— 已完成（2026-08-14 发布，tag v2.1.0）
 
-- GitHub Actions：打 tag 自动构建 exe 挂到 Releases（用户直接下载，不用 build）
-- 中英双语（界面 + README EN）
-- GitHub issue 模板 + SmartScreen 下载提示说明
-- 设置面板（端口、主题）
+发布闭环，让"别人真正能用"：
+
+- ✅ **GitHub Actions 自动构建 Release**：打 `v*` tag 即触发 `release.yml`，在 windows-latest 干净环境用 csc 构建 exe + 打包 zip，自动创建 Release 附资产（已端到端验证：v2.1.0 Release 含 exe/zip）
+- ✅ **CI 构建检查**：`ci.yml` 每次 push/PR 验证 build.bat 可构建
+- ✅ **中英双语**：界面（跟随系统/中文/English，设置可切换）+ README.en.md
+- ✅ **设置面板**：语言/主题（跟随系统/浅色/深色）/端口（默认 3080，可改）
+- ✅ **issue 模板**：Bug report + Feature request（引导用户贴"一键诊断"报告）
+- ✅ **SmartScreen 下载说明**：README 说明未签名 exe 的"仍要运行"操作
 
 ### 远期候选（未排期）
 
