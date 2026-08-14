@@ -6,7 +6,7 @@
 
 ## Features
 
-- 🧰 **One-click install**: detects Node.js / dsh automatically; if missing, one click downloads and installs a portable Node.js (no admin rights) and dsh
+- 🧰 **One-click install / fix**: detects Node.js / dsh automatically; if missing, one click downloads and installs a portable Node.js (no admin rights) and dsh. When the environment is complete it doubles as "repair & reinstall" (always available via the panel button and tray menu)
 - 🩺 **One-click diagnostics**: generates an environment report (versions/paths/port/HTTP/log tail) and copies it to the clipboard — paste it into a GitHub issue for help
 - 🧠 **Smart status**: distinguishes "Node.js not found" / "dsh not installed" / "port in use" / "running / stopped" and switches the action button accordingly
 - 🟢 **Status light**: polls the dsh web service every 2 s; green = running (shows PID), red = stopped; breathing animation while running
@@ -71,6 +71,7 @@ Produces `whale-sitter.exe` next to the sources. Only needs the csc.exe that shi
 
 ## Changelog
 
+- **v2.2.0**: "Install / Fix" always visible (panel button + tray menu; acts as repair/reinstall when the environment is complete); stops the service before installing to avoid file locks; can repair using the system npm
 - **v2.1.0**: Settings panel (language/theme/port), bilingual UI, GitHub Actions auto-build Release on tag, CI build check, EN README, issue templates
 - **v1.0.0**: Initial release — one-click install, one-click diagnostics, smart status, monitoring & switch, tray, auto-start, system theme, auto-start-on-boot
 
