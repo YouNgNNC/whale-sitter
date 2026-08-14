@@ -17,7 +17,7 @@ namespace WhaleSitter
 {
     internal static class Program
     {
-        public const string Version = "2.2.0";
+        public const string Version = "2.2.1";
 
         [STAThread]
         private static void Main()
@@ -280,7 +280,7 @@ namespace WhaleSitter
         {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("npm", "prefix -g");
+                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c npm prefix -g");
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;
@@ -872,18 +872,46 @@ namespace WhaleSitter
         {
             return Task.Run(() =>
             {
-                ProcessStartInfo psi = new ProcessStartInfo("npm", "root -g");
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true;
-                psi.RedirectStandardOutput = true;
-                Process p = Process.Start(psi);
-                string root = p.StandardOutput.ReadToEnd().Trim();
-                p.WaitForExit(3000);
-                string npmCli = Path.Combine(root, "npm", "bin", "npm-cli.js");
-                if (!File.Exists(npmCli))
-                    throw new Exception(L.Get("未找到 npm（", "npm not found (") + npmCli +
-                        "），请先安装 Node.js。");
-                return npmCli;
+                // 优先：由 node.exe 所在目录定位 npm-cli.js（不依赖 npm 可执行）
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c where node");
+                    psi.UseShellExecute = false;
+                    psi.CreateNoWindow = true;
+                    psi.RedirectStandardOutput = true;
+                    Process p = Process.Start(psi);
+                    string output = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(3000);
+                    foreach (string line in output.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string t = line.Trim();
+                        if (t.ToLowerInvariant().EndsWith("node.exe"))
+                        {
+                            string npmCli = Path.Combine(Path.GetDirectoryName(t),
+                                "node_modules", "npm", "bin", "npm-cli.js");
+                            if (File.Exists(npmCli)) return npmCli;
+                        }
+                    }
+                }
+                catch { }
+
+                // 回退：npm root -g（npm 是 .cmd，必须经 cmd.exe 执行）
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c npm root -g");
+                    psi.UseShellExecute = false;
+                    psi.CreateNoWindow = true;
+                    psi.RedirectStandardOutput = true;
+                    Process p = Process.Start(psi);
+                    string root = p.StandardOutput.ReadToEnd().Trim();
+                    p.WaitForExit(3000);
+                    string npmCli = Path.Combine(root, "npm", "bin", "npm-cli.js");
+                    if (File.Exists(npmCli)) return npmCli;
+                }
+                catch { }
+
+                throw new Exception(L.Get("未找到 npm，请先安装 Node.js 后再试。",
+                    "npm not found. Install Node.js first and retry."));
             });
         }
 
