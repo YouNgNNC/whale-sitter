@@ -66,6 +66,7 @@
 | D1 | 语言自动检测逻辑写反：`L.Set(是否中文)`，中文系统却切到英文 | 改为 `!= "zh"`（`L.Set(true)` 意为英文）；抽公共方法 `ApplyLanguage()`，构造函数与设置页复用 |
 | D2 | （v1.0.0 历史）`api.github.com` 走代理 TLS 超时 | 登录时 `$env:NO_PROXY="api.github.com"`（见 IMPLEMENTATION.md） |
 | D3 | v2.2.0「一键安装/修复」在无便携 Node 环境失败：`ResolveSystemNpmCliAsync`/`ResolveNpmPrefix` 直接 `Process.Start("npm")`（UseShellExecute=false），而 Windows 的 npm 是 .cmd 无法直接启动 → Win32Exception"系统找不到指定的文件"（换电脑实测暴露，日志 E:\Zcode-pj\dsh-web.log） | v2.2.1：`ResolveNpmPrefix` 改经 `cmd.exe /c npm prefix -g`；`ResolveSystemNpmCliAsync` 优先用 `cmd /c where node` 由 node.exe 定位 `node_modules\npm\bin\npm-cli.js`，回退 `cmd /c npm root -g`。已在本机跑通同链路（node npm-cli.js install -g 530 包成功） |
+| D4 | 其他电脑上窗口/托盘图标为默认图标：运行时从 `%AppData%\npm\dsh-web.ico`（仅开发机存在的外部文件）加载图标，其他机器加载失败回退 SystemIcons.Application（换电脑实测暴露） | v2.2.2：新增 `LoadAppIcon()` 用 `Icon.ExtractAssociatedIcon(Application.ExecutablePath)` 从 exe 内嵌资源（/win32icon）提取，窗口/托盘/标题栏图标全部改用；已验证 Release exe 内嵌图标存在（32x32 提取成功） |
 
 ## 未覆盖项（GUI 手动操作）
 

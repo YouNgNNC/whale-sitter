@@ -17,7 +17,7 @@ namespace WhaleSitter
 {
     internal static class Program
     {
-        public const string Version = "2.2.1";
+        public const string Version = "2.2.2";
 
         [STAThread]
         private static void Main()
@@ -205,8 +205,6 @@ namespace WhaleSitter
 
         private static readonly string LogPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "dsh-web.log");
-        private static readonly string IcoPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm", "dsh-web.ico");
         private readonly object logLock = new object();
 
         private readonly PictureBox whale = new PictureBox();
@@ -258,6 +256,17 @@ namespace WhaleSitter
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        private static Icon LoadAppIcon()
+        {
+            try
+            {
+                Icon ic = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (ic != null) return ic;
+            }
+            catch { }
+            return SystemIcons.Application;
+        }
 
         private static string FindPortableNodeDir()
         {
@@ -422,15 +431,11 @@ namespace WhaleSitter
             whale.SizeMode = PictureBoxSizeMode.Zoom;
             whale.Size = new Size(36, 36);
             whale.Location = new Point(18, 16);
-            try
+            using (Icon appIcon = LoadAppIcon())
             {
-                using (Icon ic = new Icon(IcoPath))
-                {
-                    whale.Image = ic.ToBitmap();
-                    Icon = (Icon)ic.Clone();
-                }
+                whale.Image = appIcon.ToBitmap();
+                Icon = (Icon)appIcon.Clone();
             }
-            catch { Icon = SystemIcons.Application; }
 
             title.Text = "whale-sitter";
             title.Font = new Font(Font.FontFamily, 15F, FontStyle.Bold);
@@ -556,8 +561,7 @@ namespace WhaleSitter
         private void InitTray()
         {
             tray.Text = "whale-sitter";
-            try { tray.Icon = new Icon(IcoPath); }
-            catch { tray.Icon = SystemIcons.Application; }
+            tray.Icon = LoadAppIcon();
             tray.Visible = true;
             tray.DoubleClick += delegate { ShowWindow(); };
 

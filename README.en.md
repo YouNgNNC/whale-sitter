@@ -71,6 +71,7 @@ Produces `whale-sitter.exe` next to the sources. Only needs the csc.exe that shi
 
 ## Changelog
 
+- **v2.2.2**: Fix window/tray icons showing as the default icon on other machines (runtime icons are now extracted from the exe's own embedded resource instead of depending on a machine-local `%AppData%\npm\dsh-web.ico` file)
 - **v2.2.1**: Fix "Install / Fix" failing on machines without a portable Node (npm is a .cmd on Windows and can't be launched directly as a process; now executed via cmd.exe, and npm-cli.js is located from the node.exe path first)
 - **v2.2.0**: "Install / Fix" always visible (panel button + tray menu; acts as repair/reinstall when the environment is complete); stops the service before installing to avoid file locks; can repair using the system npm
 - **v2.1.0**: Settings panel (language/theme/port), bilingual UI, GitHub Actions auto-build Release on tag, CI build check, EN README, issue templates
