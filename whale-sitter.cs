@@ -17,7 +17,7 @@ namespace WhaleSitter
 {
     internal static class Program
     {
-        public const string Version = "2.1.0";
+        public const string Version = "2.2.0";
 
         [STAThread]
         private static void Main()
@@ -221,6 +221,7 @@ namespace WhaleSitter
         private readonly Button openBtn = new Button();
         private readonly Button logBtn = new Button();
         private readonly Button diagBtn = new Button();
+        private readonly Button installBtn = new Button();
         private readonly Button settingsBtn = new Button();
         private readonly Label hint = new Label();
         private readonly NotifyIcon tray = new NotifyIcon();
@@ -413,7 +414,7 @@ namespace WhaleSitter
         {
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
-            ClientSize = new Size(480, 268);
+            ClientSize = new Size(520, 268);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Microsoft YaHei UI", 10F);
             DoubleBuffered = true;
@@ -466,7 +467,7 @@ namespace WhaleSitter
             toggle.Cursor = Cursors.Hand;
             toggle.Click += delegate { ToggleMain(); };
 
-            autoStartBtn.Size = new Size(100, 30);
+            autoStartBtn.Size = new Size(96, 30);
             autoStartBtn.Location = new Point(16, 202);
             autoStartBtn.FlatStyle = FlatStyle.Flat;
             autoStartBtn.FlatAppearance.BorderSize = 0;
@@ -474,32 +475,40 @@ namespace WhaleSitter
             autoStartBtn.Cursor = Cursors.Hand;
             autoStartBtn.Click += delegate { SetAutoStart(!AutoStartEnabled()); };
 
-            openBtn.Size = new Size(80, 30);
-            openBtn.Location = new Point(124, 202);
+            openBtn.Size = new Size(72, 30);
+            openBtn.Location = new Point(120, 202);
             openBtn.FlatStyle = FlatStyle.Flat;
             openBtn.FlatAppearance.BorderSize = 0;
             openBtn.Font = new Font(Font.FontFamily, 9F);
             openBtn.Cursor = Cursors.Hand;
             openBtn.Click += delegate { try { Process.Start(UrlBase + Settings.Port + "/"); } catch { } };
 
-            logBtn.Size = new Size(80, 30);
-            logBtn.Location = new Point(212, 202);
+            logBtn.Size = new Size(72, 30);
+            logBtn.Location = new Point(200, 202);
             logBtn.FlatStyle = FlatStyle.Flat;
             logBtn.FlatAppearance.BorderSize = 0;
             logBtn.Font = new Font(Font.FontFamily, 9F);
             logBtn.Cursor = Cursors.Hand;
             logBtn.Click += delegate { OpenLog(); };
 
-            diagBtn.Size = new Size(80, 30);
-            diagBtn.Location = new Point(300, 202);
+            diagBtn.Size = new Size(72, 30);
+            diagBtn.Location = new Point(280, 202);
             diagBtn.FlatStyle = FlatStyle.Flat;
             diagBtn.FlatAppearance.BorderSize = 0;
             diagBtn.Font = new Font(Font.FontFamily, 9F);
             diagBtn.Cursor = Cursors.Hand;
             diagBtn.Click += delegate { OpenDiagnostics(); };
 
-            settingsBtn.Size = new Size(80, 30);
-            settingsBtn.Location = new Point(388, 202);
+            installBtn.Size = new Size(72, 30);
+            installBtn.Location = new Point(360, 202);
+            installBtn.FlatStyle = FlatStyle.Flat;
+            installBtn.FlatAppearance.BorderSize = 0;
+            installBtn.Font = new Font(Font.FontFamily, 9F);
+            installBtn.Cursor = Cursors.Hand;
+            installBtn.Click += delegate { InstallAll(); };
+
+            settingsBtn.Size = new Size(72, 30);
+            settingsBtn.Location = new Point(440, 202);
             settingsBtn.FlatStyle = FlatStyle.Flat;
             settingsBtn.FlatAppearance.BorderSize = 0;
             settingsBtn.Font = new Font(Font.FontFamily, 9F);
@@ -519,6 +528,7 @@ namespace WhaleSitter
             Controls.Add(openBtn);
             Controls.Add(logBtn);
             Controls.Add(diagBtn);
+            Controls.Add(installBtn);
             Controls.Add(settingsBtn);
             Controls.Add(hint);
 
@@ -533,6 +543,7 @@ namespace WhaleSitter
             openBtn.Text = L.Get("打开界面", "Open UI");
             logBtn.Text = L.Get("查看日志", "View Log");
             diagBtn.Text = L.Get("一键诊断", "Diagnose");
+            installBtn.Text = L.Get("安装/修复", "Install/Fix");
             settingsBtn.Text = L.Get("设置", "Settings");
             hint.Text = L.Get("✕ 关闭 = 最小化到托盘", "✕ Close = minimize to tray");
             UpdateAutoStartButton();
@@ -556,6 +567,7 @@ namespace WhaleSitter
             trayMenu.Items.Add("", null, delegate { OpenLog(); });
             trayMenu.Items.Add("", null, delegate { OpenDiagnostics(); });
             trayMenu.Items.Add("", null, delegate { OpenSettings(); });
+            trayMenu.Items.Add("", null, delegate { InstallAll(); });
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("", null, delegate { StartServer(); });
             trayMenu.Items.Add("", null, delegate { StopServer(); });
@@ -572,15 +584,16 @@ namespace WhaleSitter
 
         private void UpdateTrayMenu()
         {
-            if (trayMenu == null || trayMenu.Items.Count < 10) return;
+            if (trayMenu == null || trayMenu.Items.Count < 11) return;
             trayMenu.Items[0].Text = L.Get("打开监控台", "Open Monitor");
             trayMenu.Items[1].Text = L.Get("打开界面", "Open UI");
             trayMenu.Items[2].Text = L.Get("查看日志", "View Log");
             trayMenu.Items[3].Text = L.Get("一键诊断", "Diagnose");
             trayMenu.Items[4].Text = L.Get("设置", "Settings");
-            trayMenu.Items[6].Text = L.Get("启动服务", "Start Service");
-            trayMenu.Items[7].Text = L.Get("停止服务", "Stop Service");
-            trayMenu.Items[9].Text = L.Get("退出", "Exit");
+            trayMenu.Items[5].Text = L.Get("一键安装 / 修复环境", "Install / Fix Environment");
+            trayMenu.Items[7].Text = L.Get("启动服务", "Start Service");
+            trayMenu.Items[8].Text = L.Get("停止服务", "Stop Service");
+            trayMenu.Items[10].Text = L.Get("退出", "Exit");
         }
 
         private void OpenLog()
@@ -626,7 +639,7 @@ namespace WhaleSitter
             UpdateStatusUi();
             UpdateAutoStartButton();
 
-            foreach (Control c in new Control[] { autoStartBtn, openBtn, logBtn, diagBtn, settingsBtn })
+            foreach (Control c in new Control[] { autoStartBtn, openBtn, logBtn, diagBtn, installBtn, settingsBtn })
             {
                 c.BackColor = pal.BtnBg;
                 c.ForeColor = pal.BtnText;
@@ -799,20 +812,41 @@ namespace WhaleSitter
             UpdateStatusUi();
             try
             {
-                string nodeDir = PortableNodeDir;
-                if (nodeDir == null)
+                bool wasRunning = running;
+                if (wasRunning)
                 {
-                    SetInstallUi(L.Get("正在下载 Node.js…", "Downloading Node.js…"));
-                    AppendLog("开始安装：下载 Node.js");
-                    nodeDir = await InstallNodeAsync();
+                    StopServer();
+                    await Task.Delay(600);
                 }
 
-                SetInstallUi(L.Get("正在安装 DeepSeek Harness（可能需要几分钟）…",
-                    "Installing DeepSeek Harness (may take a few minutes)…"));
-                AppendLog("开始安装：npm install -g @deepseek-ai/dsh");
-                await InstallDshAsync(nodeDir);
+                string nodeDir = PortableNodeDir;
+                if (nodeDir != null)
+                {
+                    SetInstallUi(L.Get("正在安装/修复 DeepSeek Harness（可能需要几分钟）…",
+                        "Installing/repairing DeepSeek Harness (may take a few minutes)…"));
+                    AppendLog("一键安装/修复：npm install -g @deepseek-ai/dsh（便携 Node）");
+                    await RunNpmInstallAsync(Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"), nodeDir);
+                }
+                else if (NodeAvailable())
+                {
+                    SetInstallUi(L.Get("正在安装/修复 DeepSeek Harness（可能需要几分钟）…",
+                        "Installing/repairing DeepSeek Harness (may take a few minutes)…"));
+                    AppendLog("一键安装/修复：npm install -g @deepseek-ai/dsh（系统 Node）");
+                    string npmCli = await ResolveSystemNpmCliAsync();
+                    await RunNpmInstallAsync(npmCli, null);
+                }
+                else
+                {
+                    SetInstallUi(L.Get("正在下载 Node.js…", "Downloading Node.js…"));
+                    AppendLog("一键安装：下载 Node.js");
+                    nodeDir = await InstallNodeAsync();
+                    SetInstallUi(L.Get("正在安装 DeepSeek Harness（可能需要几分钟）…",
+                        "Installing DeepSeek Harness (may take a few minutes)…"));
+                    AppendLog("一键安装：npm install -g @deepseek-ai/dsh（便携 Node）");
+                    await RunNpmInstallAsync(Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"), nodeDir);
+                    PortableNodeDir = FindPortableNodeDir();
+                }
 
-                PortableNodeDir = FindPortableNodeDir();
                 UpdateStatus();
                 SetInstallUi(L.Get("安装完成，正在启动服务…", "Installed. Starting service…"));
                 if (!DshInstalled())
@@ -832,6 +866,53 @@ namespace WhaleSitter
                 installInProgress = false;
                 UpdateStatusUi();
             }
+        }
+
+        private Task<string> ResolveSystemNpmCliAsync()
+        {
+            return Task.Run(() =>
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("npm", "root -g");
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                Process p = Process.Start(psi);
+                string root = p.StandardOutput.ReadToEnd().Trim();
+                p.WaitForExit(3000);
+                string npmCli = Path.Combine(root, "npm", "bin", "npm-cli.js");
+                if (!File.Exists(npmCli))
+                    throw new Exception(L.Get("未找到 npm（", "npm not found (") + npmCli +
+                        "），请先安装 Node.js。");
+                return npmCli;
+            });
+        }
+
+        private Task RunNpmInstallAsync(string npmCli, string workingDir)
+        {
+            return Task.Run(() =>
+            {
+                if (!File.Exists(npmCli))
+                    throw new Exception(L.Get("未找到 npm（", "npm not found (") + npmCli + "），安装不完整。");
+
+                ProcessStartInfo psi = new ProcessStartInfo("node.exe", "\"" + npmCli + "\" install -g @deepseek-ai/dsh");
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                psi.WorkingDirectory = workingDir ?? NpmDir;
+
+                Process p = Process.Start(psi);
+                string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+                p.WaitForExit();
+
+                lock (logLock)
+                {
+                    try { File.AppendAllText(LogPath, output + Environment.NewLine); } catch { }
+                }
+                if (p.ExitCode != 0)
+                    throw new Exception(L.Get("npm 安装失败（exit ", "npm install failed (exit ") +
+                        p.ExitCode + "），详见日志。");
+            });
         }
 
         private Task<string> InstallNodeAsync()
@@ -895,37 +976,6 @@ namespace WhaleSitter
                     throw new Exception(L.Get("Node.js 解压后未找到 node.exe，请重试。",
                         "node.exe not found after extracting Node.js. Retry."));
                 return nodeDir;
-            });
-        }
-
-        private Task InstallDshAsync(string nodeDir)
-        {
-            return Task.Run(() =>
-            {
-                string npmCli = Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js");
-                if (!File.Exists(npmCli))
-                    throw new Exception(L.Get("未找到 npm（", "npm not found (") + npmCli + "），安装不完整。");
-
-                ProcessStartInfo psi = new ProcessStartInfo(
-                    Path.Combine(nodeDir, "node.exe"),
-                    "\"" + npmCli + "\" install -g @deepseek-ai/dsh");
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true;
-                psi.RedirectStandardOutput = true;
-                psi.RedirectStandardError = true;
-                psi.WorkingDirectory = nodeDir;
-
-                Process p = Process.Start(psi);
-                string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
-                p.WaitForExit();
-
-                lock (logLock)
-                {
-                    try { File.AppendAllText(LogPath, output + Environment.NewLine); } catch { }
-                }
-                if (p.ExitCode != 0)
-                    throw new Exception(L.Get("npm 安装失败（exit ", "npm install failed (exit ") +
-                        p.ExitCode + "），详见日志。");
             });
         }
 
