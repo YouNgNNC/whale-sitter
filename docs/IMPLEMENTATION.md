@@ -117,6 +117,7 @@ git push --force-with-lease origin main
 | ZipFile 编译不过 | 增加 `/r:System.IO.Compression.FileSystem.dll` |
 | Process 跑不了 npm.cmd（UseShellExecute=false） | 用 node 执行 npm-cli.js；**需要跑 npm 命令时经 `cmd.exe /c`**（v2.2.0 曾在 ResolveSystemNpmCliAsync 重新踩坑：`Process.Start("npm")` 直接 Win32Exception，v2.2.1 修复为 `cmd /c where node` 定位 npm-cli.js + `cmd /c npm root -g` 回退） |
 | 白底鲸鱼图直接当图标有白方块 | 亮度→alpha + 从四边洪泛区分"外部背景"与"肚皮内部留白"，肚皮保留白色 |
+| 运行时图标依赖外部文件导致换机失效（v2.2.0 曾从 %AppData%\npm\dsh-web.ico 加载，其他机器没有 → 默认图标） | v2.2.2：`LoadAppIcon()` 用 `Icon.ExtractAssociatedIcon(Application.ExecutablePath)` 从 exe 内嵌资源取图标，窗口/托盘通用 |
 | 重复启动弹"已在运行"框 | 单实例 Mutex 的预期行为（托盘找图标即可） |
 | 旧进程占用 exe 无法覆盖构建 | 先 `taskkill /F /IM whale-sitter.exe` 再 build |
 
