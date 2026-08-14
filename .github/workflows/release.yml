@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with csc
+        shell: cmd
+        run: build.bat
+
+      - name: Verify artifact
+        shell: powershell
+        run: |
+          if (-not (Test-Path .\whale-sitter.exe)) { throw "whale-sitter.exe not built" }
+          $size = (Get-Item .\whale-sitter.exe).Length
+          if ($size -lt 30000) { throw "suspiciously small exe ($size bytes)" }
+          Write-Host "OK: $size bytes"
+
+      - name: Package zip
+        shell: powershell
+        run: Compress-Archive -Path whale-sitter.exe -DestinationPath whale-sitter-win64.zip -Force
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" whale-sitter.exe whale-sitter-win64.zip --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
