@@ -79,7 +79,7 @@ build.bat
 ## 常见问题
 
 **Q：状态一直是"已停止"，点启动也起不来？**
-点「查看日志」看 `%AppData%\npm\dsh-web.log`。常见原因：dsh 的 web profile（`%USERPROFILE%\.dsh\profiles\web`）里装了与当前 dsh 版本不兼容的插件，启动即崩溃（例如本地插件报 `cannot get property "tools" without inject`）。处理：备份后把该插件从 profile 的 `package.json` 依赖和 `cordis.patch.yml` 的 insert 中移除，再点「安装/修复」或重启应用。完整排查记录见 [docs/TROUBLESHOOTING-imagegen-plugin.md](docs/TROUBLESHOOTING-imagegen-plugin.md)。
+点「查看日志」看 `%AppData%\npm\dsh-web.log`。常见原因：dsh 的 web profile（`%USERPROFILE%\.dsh\profiles\web`）里装了与当前 dsh 版本不兼容的插件，启动即崩溃（例如本地插件报 `cannot get property "tools" without inject`）。处理：备份后把该插件从 profile 的 `package.json` 依赖和 `cordis.patch.yml` 的 insert 中移除，再点「安装/修复」或重启应用。
 
 **Q：为什么我从没看到过"一键安装"？**
 环境齐全时按钮显示为启动/停止；只有缺 Node.js 或缺 dsh 时才会变成"一键安装"。底部「安装/修复」按钮和托盘菜单随时可用来重装/修复环境。
