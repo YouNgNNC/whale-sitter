@@ -8,3 +8,6 @@ obj/
 .vs/
 *.user
 Thumbs.db
+
+# 本地排查记录（含本机路径，勿推送到 GitHub）
+docs/TROUBLESHOOTING-imagegen-plugin.md
