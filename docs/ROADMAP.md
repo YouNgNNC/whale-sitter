@@ -72,7 +72,7 @@
 
 - **单提交原则**：功能全部完成并验证后再发布，避免频繁的中间版本
 - 新仓库（无协作者）允许 `git checkout --orphan` + `--force-with-lease` 压历史；仓库有人使用后不再重写历史，改走 tag + Release
-- 提交署名用 GitHub noreply 匿名邮箱（`YouNgNNC@users.noreply.github.com`），不暴露真实邮箱
+- 提交署名用 GitHub noreply 匿名邮箱（`<你的用户名>@users.noreply.github.com`），不暴露真实邮箱
 
 ## 6. 相关文档
 
