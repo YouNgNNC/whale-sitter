@@ -100,7 +100,7 @@ gh repo create whale-sitter --public --source . --push
 # 4. 压成单提交（v1.0.0，重写历史，仅适用于无协作者新仓库）
 git checkout --orphan tmp-final
 git add -A
-git -c user.name="YouNgNNC" -c user.email="YouNgNNC@users.noreply.github.com" commit -m "v1.0.0: ..."
+git -c user.name="your-github-name" -c user.email="your-github-name@users.noreply.github.com" commit -m "v1.0.0: ..."
 git branch -M tmp-final main
 git push --force-with-lease origin main
 ```
@@ -126,7 +126,7 @@ git push --force-with-lease origin main
 - 进程：`whale-sitter.exe` 单一实例
 - 服务：127.0.0.1:3080 LISTENING，HTTP 200
 - 日志：`%AppData%\npm\dsh-web.log` 记录 dsh 启动输出
-- 桌面入口：`E:\Desktop\DeepSeek Harness.lnk` → `C:\Users\YouNg_LEGION\whale-sitter\whale-sitter.exe`
+- 桌面入口：把编译出的 `whale-sitter.exe` 放到固定目录后创建桌面快捷方式（图标取自 exe 内嵌资源）
 
 ## 7. 相关文档
 
