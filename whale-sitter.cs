@@ -17,7 +17,7 @@ namespace WhaleSitter
 {
     internal static class Program
     {
-        public const string Version = "2.2.2";
+        public const string Version = "2.3.0";
 
         [STAThread]
         private static void Main()
@@ -53,6 +53,9 @@ namespace WhaleSitter
         public static int Lang;   // 0 auto, 1 zh, 2 en
         public static int Theme;  // 0 auto, 1 light, 2 dark
         public static int Port = 3080;
+        /// Explicit dsh version for install/repair. Empty means: a repair keeps
+        /// the version already installed, a first-time install takes the latest.
+        public static string DshVersion = "";
 
         public static void Load()
         {
@@ -65,6 +68,7 @@ namespace WhaleSitter
                     v = k.GetValue("Lang"); if (v != null) Lang = Convert.ToInt32(v);
                     v = k.GetValue("Theme"); if (v != null) Theme = Convert.ToInt32(v);
                     v = k.GetValue("Port"); if (v != null) Port = Convert.ToInt32(v);
+                    v = k.GetValue("DshVersion"); if (v != null) DshVersion = Convert.ToString(v);
                 }
             }
             catch { }
@@ -79,6 +83,7 @@ namespace WhaleSitter
                     k.SetValue("Lang", Lang);
                     k.SetValue("Theme", Theme);
                     k.SetValue("Port", Port);
+                    k.SetValue("DshVersion", DshVersion == null ? "" : DshVersion);
                 }
             }
             catch { }
@@ -328,6 +333,115 @@ namespace WhaleSitter
             return File.Exists(DshEntry);
         }
 
+        /// <summary>
+        /// Version of the installed dsh, or null when none is present.
+        /// Read from the package manifest rather than by running the CLI, so it
+        /// also works while the service is stopped.
+        /// </summary>
+        private static string InstalledDshVersion()
+        {
+            try
+            {
+                if (!DshInstalled()) return null;
+                string pkgDir = Path.GetDirectoryName(Path.GetDirectoryName(DshEntry));
+                string manifest = Path.Combine(pkgDir, "package.json");
+                if (!File.Exists(manifest)) return null;
+                Match m = Regex.Match(File.ReadAllText(manifest), "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                return m.Success ? m.Groups[1].Value : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// The access token of the newest server boot, or null when the running
+        /// dsh does not use one.
+        ///
+        /// dsh 0.1.5+ prints "dsh web: http://127.0.0.1:PORT/?token=..." and
+        /// answers an unauthenticated request with 404, so the token has to be
+        /// recovered from the log to open the UI at all. It is re-read on every
+        /// call because each boot mints a new one.
+        /// </summary>
+        private static string CurrentAccessToken()
+        {
+            try
+            {
+                if (!File.Exists(LogPath)) return null;
+                return TokenFromLogLines(File.ReadAllLines(LogPath), Settings.Port);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Pull the token for <paramref name="port"/> out of log lines, newest
+        /// boot winning. Split out from the file read so the parsing is testable
+        /// without touching the live log. Returns null when no line carries one,
+        /// which is how dsh up to 0.1.0-rc.6 prints its address.
+        /// </summary>
+        private static string TokenFromLogLines(string[] lines, int port)
+        {
+            if (lines == null) return null;
+            string needle = UrlBase + port + "/?token=";
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                int at = lines[i].IndexOf(needle, StringComparison.Ordinal);
+                if (at < 0) continue;
+                string rest = lines[i].Substring(at + needle.Length).Trim();
+                int end = rest.IndexOfAny(new char[] { ' ', '\t', '\r' });
+                string token = end < 0 ? rest : rest.Substring(0, end);
+                return token.Length == 0 ? null : token;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// The URL a browser should open: the plain address, plus the boot token
+        /// when the running dsh requires one.
+        /// </summary>
+        private static string UiUrl()
+        {
+            string token = CurrentAccessToken();
+            if (token == null) return UrlBase + Settings.Port + "/";
+            return UrlBase + Settings.Port + "/?token=" + token;
+        }
+
+        /// <summary>
+        /// Strip access tokens out of text that may be pasted into a public
+        /// issue. The diagnostics report ends with raw log lines, and those
+        /// lines carry the token dsh prints at boot.
+        /// </summary>
+        private static string RedactToken(string text)
+        {
+            if (text == null) return null;
+            return Regex.Replace(text, "(\\?token=)[A-Za-z0-9_\\-]+", "$1<redacted>");
+        }
+
+        /// <summary>
+        /// The version spec appended to the install command.
+        ///
+        /// An explicit version from settings wins; otherwise a repair reinstalls
+        /// the version already on disk, so "修复" never silently changes version,
+        /// and only a first-time install takes the latest. Pinning matters beyond
+        /// surprise: the install replaces the package wholesale, so an unpinned
+        /// upgrade also discards any locally patched file inside it.
+        /// </summary>
+        private static string InstallSpec()
+        {
+            string pinned = Settings.DshVersion == null ? "" : Settings.DshVersion.Trim();
+            if (pinned.Length > 0)
+            {
+                if (pinned.StartsWith("@")) return pinned;
+                return "@" + pinned;
+            }
+            string current = InstalledDshVersion();
+            return current == null ? "" : "@" + current;
+        }
+
+        private static string VersionOrUnknown(string version)
+        {
+            if (version != null && version.Length > 0) return version;
+            return L.Get("未安装", "not installed");
+        }
+
         private static bool SystemUsesLightTheme()
         {
             try
@@ -486,7 +600,7 @@ namespace WhaleSitter
             openBtn.FlatAppearance.BorderSize = 0;
             openBtn.Font = new Font(Font.FontFamily, 9F);
             openBtn.Cursor = Cursors.Hand;
-            openBtn.Click += delegate { try { Process.Start(UrlBase + Settings.Port + "/"); } catch { } };
+            openBtn.Click += delegate { OpenUi(); };
 
             logBtn.Size = new Size(72, 30);
             logBtn.Location = new Point(200, 202);
@@ -567,7 +681,7 @@ namespace WhaleSitter
 
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("", null, delegate { ShowWindow(); });
-            trayMenu.Items.Add("", null, delegate { try { Process.Start(UrlBase + Settings.Port + "/"); } catch { } });
+            trayMenu.Items.Add("", null, delegate { OpenUi(); });
             trayMenu.Items.Add("", null, delegate { OpenLog(); });
             trayMenu.Items.Add("", null, delegate { OpenDiagnostics(); });
             trayMenu.Items.Add("", null, delegate { OpenSettings(); });
@@ -721,7 +835,9 @@ namespace WhaleSitter
                 return;
             }
 
-            statusHint.Text = L.Get("Web UI  http://127.0.0.1:", "Web UI  http://127.0.0.1:") + Settings.Port;
+            string dshVersion = InstalledDshVersion();
+            statusHint.Text = L.Get("Web UI  http://127.0.0.1:", "Web UI  http://127.0.0.1:") + Settings.Port
+                + (dshVersion == null ? "" : "  ·  dsh " + dshVersion);
             if (running)
             {
                 dot.ForeColor = pulseOn ? pal.Success : pal.SuccessDim;
@@ -822,20 +938,20 @@ namespace WhaleSitter
                     StopServer();
                     await Task.Delay(600);
                 }
-
+                string versionBefore = InstalledDshVersion();
                 string nodeDir = PortableNodeDir;
                 if (nodeDir != null)
                 {
                     SetInstallUi(L.Get("正在安装/修复 DeepSeek Harness（可能需要几分钟）…",
                         "Installing/repairing DeepSeek Harness (may take a few minutes)…"));
-                    AppendLog("一键安装/修复：npm install -g @deepseek-ai/dsh（便携 Node）");
+                    AppendLog("一键安装/修复：安装 dsh（便携 Node）");
                     await RunNpmInstallAsync(Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"), nodeDir);
                 }
                 else if (NodeAvailable())
                 {
                     SetInstallUi(L.Get("正在安装/修复 DeepSeek Harness（可能需要几分钟）…",
                         "Installing/repairing DeepSeek Harness (may take a few minutes)…"));
-                    AppendLog("一键安装/修复：npm install -g @deepseek-ai/dsh（系统 Node）");
+                    AppendLog("一键安装/修复：安装 dsh（系统 Node）");
                     string npmCli = await ResolveSystemNpmCliAsync();
                     await RunNpmInstallAsync(npmCli, null);
                 }
@@ -846,7 +962,7 @@ namespace WhaleSitter
                     nodeDir = await InstallNodeAsync();
                     SetInstallUi(L.Get("正在安装 DeepSeek Harness（可能需要几分钟）…",
                         "Installing DeepSeek Harness (may take a few minutes)…"));
-                    AppendLog("一键安装：npm install -g @deepseek-ai/dsh（便携 Node）");
+                    AppendLog("一键安装：安装 dsh（便携 Node）");
                     await RunNpmInstallAsync(Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"), nodeDir);
                     PortableNodeDir = FindPortableNodeDir();
                 }
@@ -856,6 +972,18 @@ namespace WhaleSitter
                 if (!DshInstalled())
                     throw new Exception(L.Get("dsh 安装后仍未检测到，请查看日志或使用一键诊断。",
                         "dsh still not detected after install. Check the log or use Diagnose."));
+
+                // Report the version transition, and say plainly what an upgrade
+                // costs: the install replaces the package wholesale, so anything
+                // patched inside it is gone.
+                string versionAfter = InstalledDshVersion();
+                AppendLog("dsh 版本：" + VersionOrUnknown(versionBefore) + " -> " + VersionOrUnknown(versionAfter));
+                if (versionBefore != null && versionAfter != null && versionBefore != versionAfter)
+                {
+                    AppendLog(L.Get("注意：dsh 版本已变化，包内若有本地补丁/修改，需要在升级后重新应用。",
+                        "Note: the dsh version changed. Any locally patched files inside the package must be re-applied."));
+                }
+
                 if (!running) StartServer();
                 status.Text = L.Get("安装完成", "Install complete");
             }
@@ -926,7 +1054,9 @@ namespace WhaleSitter
                 if (!File.Exists(npmCli))
                     throw new Exception(L.Get("未找到 npm（", "npm not found (") + npmCli + "），安装不完整。");
 
-                ProcessStartInfo psi = new ProcessStartInfo("node.exe", "\"" + npmCli + "\" install -g @deepseek-ai/dsh");
+                string spec = InstallSpec();
+                AppendLog("执行：npm install -g @deepseek-ai/dsh" + spec);
+                ProcessStartInfo psi = new ProcessStartInfo("node.exe", "\"" + npmCli + "\" install -g @deepseek-ai/dsh" + spec);
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
                 psi.RedirectStandardOutput = true;
@@ -1118,6 +1248,7 @@ namespace WhaleSitter
                     Settings.Lang = f.Lang;
                     Settings.Theme = f.Theme;
                     Settings.Port = f.Port;
+                    Settings.DshVersion = f.DshVersion == null ? "" : f.DshVersion;
                     Settings.Save();
 
                     if (langChanged)
@@ -1150,6 +1281,10 @@ namespace WhaleSitter
             sb.AppendLine("Node: " + NodeVersionText());
             sb.AppendLine(L.Get("npm 目录", "npm dir") + ": " + NpmDir);
             sb.AppendLine(L.Get("dsh 入口", "dsh entry") + ": " + (File.Exists(DshEntry) ? DshEntry : L.Get("未安装", "not installed")));
+            sb.AppendLine(L.Get("dsh 版本", "dsh version") + ": " + VersionOrUnknown(InstalledDshVersion()));
+            sb.AppendLine(L.Get("界面鉴权", "UI auth") + ": " + (CurrentAccessToken() == null
+                ? L.Get("无（直接打开即可）", "none (open the plain URL)")
+                : L.Get("需要启动 token（打开界面按钮会自动带上）", "boot token required (the Open UI button carries it)")));
             int pid = FindPidByPort(Settings.Port);
             sb.AppendLine(L.Get("端口 ", "Port ") + Settings.Port + ": " + (pid > 0 ? L.Get("运行中 (PID ", "Running (PID ") + pid + ")" : L.Get("空闲", "free")));
             sb.AppendLine("HTTP " + UrlBase + Settings.Port + "/: " + HttpStatusText());
@@ -1160,7 +1295,7 @@ namespace WhaleSitter
                 {
                     string[] lines = File.ReadAllLines(LogPath);
                     for (int i = Math.Max(0, lines.Length - 20); i < lines.Length; i++)
-                        sb.AppendLine(lines[i]);
+                        sb.AppendLine(RedactToken(lines[i]));
                 }
                 else sb.AppendLine(L.Get("(日志文件不存在)", "(log file missing)"));
             }
@@ -1169,17 +1304,70 @@ namespace WhaleSitter
             ShowReportDialog(sb.ToString());
         }
 
+        /// <summary>
+        /// Open the web UI in the default browser, carrying the boot token when
+        /// the running dsh requires one.
+        /// </summary>
+        private void OpenUi()
+        {
+            try { Process.Start(UiUrl()); }
+            catch (Exception ex) { AppendLog("打开界面失败: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// HTTP status of the app root, probed twice: unauthenticated, then with
+        /// the boot token when the log carries one.
+        ///
+        /// dsh 0.1.5+ answers an unauthenticated request with 404 and a request
+        /// carrying "?token=" with a 303 that sets the auth cookie, which the
+        /// browser then follows to the app. Reporting both is what distinguishes
+        /// "the server is up but wants a token" from "the server is down".
+        /// </summary>
         private string HttpStatusText()
+        {
+            string[] urls = HttpProbeUrls();
+            if (urls.Length == 1) return HttpStatusFor(urls[0]);
+            return HttpStatusFor(urls[0]) + L.Get("，带 token: ", ", with token: ") + HttpStatusFor(urls[1]);
+        }
+
+        /// <summary>
+        /// The URLs the health probe hits: the plain root, plus the tokenised
+        /// one when the running dsh requires a token. Split out so the pair can
+        /// be asserted without a live server.
+        /// </summary>
+        private static string[] HttpProbeUrls()
+        {
+            string bare = UrlBase + Settings.Port + "/";
+            string token = CurrentAccessToken();
+            if (token == null) return new string[] { bare };
+            return new string[] { bare, bare + "?token=" + token };
+        }
+
+        private string HttpStatusFor(string url)
         {
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(UrlBase + Settings.Port + "/");
+                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
                 req.Method = "GET";
                 req.Timeout = 2000;
+                // Redirects are followed: a tokenised 303 landing on the app as
+                // 200 is exactly the healthy signal this probe exists to report.
                 using (HttpWebResponse res = (HttpWebResponse)req.GetResponse())
                 {
                     return ((int)res.StatusCode).ToString();
                 }
+            }
+            catch (WebException wex)
+            {
+                // A 4xx/5xx is the server answering, not a connection failure.
+                if (wex.Response != null)
+                {
+                    using (HttpWebResponse res = (HttpWebResponse)wex.Response)
+                    {
+                        return ((int)res.StatusCode).ToString();
+                    }
+                }
+                return L.Get("连接失败 (", "Connection failed (") + wex.Message + ")";
             }
             catch (Exception ex) { return L.Get("连接失败 (", "Connection failed (") + ex.Message + ")"; }
         }
@@ -1248,10 +1436,12 @@ namespace WhaleSitter
         public int Lang;
         public int Theme;
         public int Port;
+        public string DshVersion;
 
         private readonly ComboBox langBox = new ComboBox();
         private readonly ComboBox themeBox = new ComboBox();
         private readonly NumericUpDown portBox = new NumericUpDown();
+        private readonly TextBox versionBox = new TextBox();
         private Palette pal;
 
         public SettingsForm(Palette p)
@@ -1260,6 +1450,7 @@ namespace WhaleSitter
             Lang = Settings.Lang;
             Theme = Settings.Theme;
             Port = Settings.Port;
+            DshVersion = Settings.DshVersion;
             InitUi();
         }
 
@@ -1270,7 +1461,7 @@ namespace WhaleSitter
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(340, 190);
+            ClientSize = new Size(340, 250);
             BackColor = pal.WindowBg;
             ForeColor = pal.Text;
             Font = new Font("Microsoft YaHei UI", 10F);
@@ -1280,12 +1471,29 @@ namespace WhaleSitter
             AddRow(1, L.Get("主题", "Theme"), themeBox,
                 new string[] { L.Get("跟随系统", "System"), L.Get("浅色", "Light"), L.Get("深色", "Dark") }, Theme);
 
+            Label versionLabel = new Label();
+            versionLabel.Text = L.Get("dsh 版本", "dsh version");
+            versionLabel.Location = new Point(24, 112);
+            versionLabel.AutoSize = true;
+
+            versionBox.Location = new Point(150, 108);
+            versionBox.Size = new Size(150, 24);
+            versionBox.Text = DshVersion == null ? "" : DshVersion;
+
+            Label versionHint = new Label();
+            versionHint.Text = L.Get("留空 = 修复保持当前版本，全新安装取最新",
+                "Empty = keep the version on repair");
+            versionHint.Location = new Point(24, 136);
+            versionHint.AutoSize = true;
+            versionHint.ForeColor = pal.TextDim;
+            versionHint.Font = new Font(Font.FontFamily, 8F);
+
             Label portLabel = new Label();
             portLabel.Text = L.Get("服务端口", "Server port");
-            portLabel.Location = new Point(24, 96);
+            portLabel.Location = new Point(24, 164);
             portLabel.AutoSize = true;
 
-            portBox.Location = new Point(150, 92);
+            portBox.Location = new Point(150, 160);
             portBox.Size = new Size(120, 24);
             portBox.Minimum = 1024;
             portBox.Maximum = 65535;
@@ -1297,12 +1505,13 @@ namespace WhaleSitter
             ok.BackColor = pal.Accent;
             ok.ForeColor = Color.White;
             ok.Size = new Size(120, 32);
-            ok.Location = new Point(90, 140);
+            ok.Location = new Point(90, 200);
             ok.Click += delegate
             {
                 Lang = langBox.SelectedIndex < 0 ? 0 : langBox.SelectedIndex;
                 Theme = themeBox.SelectedIndex < 0 ? 0 : themeBox.SelectedIndex;
                 Port = (int)portBox.Value;
+                DshVersion = versionBox.Text.Trim();
                 DialogResult = DialogResult.OK;
             };
 
@@ -1312,9 +1521,12 @@ namespace WhaleSitter
             cancel.BackColor = pal.BtnBg;
             cancel.ForeColor = pal.BtnText;
             cancel.Size = new Size(120, 32);
-            cancel.Location = new Point(220, 140);
+            cancel.Location = new Point(220, 200);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; };
 
+            Controls.Add(versionLabel);
+            Controls.Add(versionBox);
+            Controls.Add(versionHint);
             Controls.Add(portLabel);
             Controls.Add(portBox);
             Controls.Add(ok);

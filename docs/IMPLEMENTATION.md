@@ -120,6 +120,10 @@ git push --force-with-lease origin main
 | 运行时图标依赖外部文件导致换机失效（v2.2.0 曾从 %AppData%\npm\dsh-web.ico 加载，其他机器没有 → 默认图标） | v2.2.2：`LoadAppIcon()` 用 `Icon.ExtractAssociatedIcon(Application.ExecutablePath)` 从 exe 内嵌资源取图标，窗口/托盘通用 |
 | 重复启动弹"已在运行"框 | 单实例 Mutex 的预期行为（托盘找图标即可） |
 | 旧进程占用 exe 无法覆盖构建 | 先 `taskkill /F /IM whale-sitter.exe` 再 build |
+| dsh 0.1.5 起界面被访问 token 保护，裸 URL 打开是 401/404（v2.3.0 适配） | 从服务日志取**最新一次** `dsh web: http://127.0.0.1:PORT/?token=…` 的 token 拼进 URL；旧版日志无 token 则回退裸 URL。解析核心 `TokenFromLogLines(lines, port)` 与取文件分开，便于测试 |
+| 「安装/修复」固定跑未钉版本的 `npm install -g @deepseek-ai/dsh`，会静默升级到 latest 并整包覆盖（v2.3.0 适配） | `InstallSpec()`：设置面板指定版本优先；留空时修复＝重装**当前已装版本**（从包 manifest 读），只有全新安装取最新。版本变化写日志并提示包内本地补丁需重新应用 |
+| 诊断报告要贴公开 issue，但新版日志里带访问 token（v2.3.0 适配） | `RedactToken()` 把 `?token=…` 替换为 `?token=<redacted>`，报告里的日志末尾整体过一遍 |
+| 手工像素坐标加控件容易越界/重叠（v2.3.0 加版本输入框时真撞过一次） | 程序化布局检查：构造 `SettingsForm` 不显示，断言控件都在客户区内且两两不相交 |
 
 ## 6. 本机运行验证（v1.0.0）
 

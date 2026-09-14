@@ -59,6 +59,14 @@
 | Actions | windows-latest 跑 build.bat | 构建 + 校验 exe | 见执行结果 |
 | Release | gh release create | 生成 Release 且附带 exe/zip 资产 | 见执行结果 |
 
+### T8 dsh 0.1.5 适配（脚本化，v2.3.0）
+| 项 | 步骤 | 预期 | 结果 |
+|---|---|---|---|
+| 静态逻辑 | 测试程序与 `whale-sitter.cs` 一起编译，直接调被测内部函数（token 解析/脱敏/版本/锁版本/URL 组合/布局） | 全绿 | ✅ 29 项 |
+| 端到端（旧版） | 对 **0.1.0-rc.6 真实日志 + 线上 3080** 跑：日志无 token → 裸 URL 应 200 且含 `__DSH_BOOT__` | 无回归 | ✅ 31 项全绿 |
+| 端到端（新版） | 对 **0.1.5-rc.1 真实日志 + 真实 9999 服务**跑：解析出 43 位 token → 裸访问被拒 → 带 token 200 且含 `__DSH_BOOT__` | 适配生效 | ✅ 34 项全绿 |
+| 构建 | csc 发布参数（`-target:winexe` + `-win32icon`） | 编译通过 | ✅ |
+
 ## 发现的缺陷与修复
 
 | 编号 | 缺陷 | 修复 |
@@ -67,6 +75,8 @@
 | D2 | （v1.0.0 历史）`api.github.com` 走代理 TLS 超时 | 登录时 `$env:NO_PROXY="api.github.com"`（见 IMPLEMENTATION.md） |
 | D3 | v2.2.0「一键安装/修复」在无便携 Node 环境失败：`ResolveSystemNpmCliAsync`/`ResolveNpmPrefix` 直接 `Process.Start("npm")`（UseShellExecute=false），而 Windows 的 npm 是 .cmd 无法直接启动 → Win32Exception"系统找不到指定的文件"（换电脑实测暴露） | v2.2.1：`ResolveNpmPrefix` 改经 `cmd.exe /c npm prefix -g`；`ResolveSystemNpmCliAsync` 优先用 `cmd /c where node` 由 node.exe 定位 `node_modules\npm\bin\npm-cli.js`，回退 `cmd /c npm root -g`。已在本机跑通同链路（node npm-cli.js install -g 530 包成功） |
 | D4 | 其他电脑上窗口/托盘图标为默认图标：运行时从 `%AppData%\npm\dsh-web.ico`（仅开发机存在的外部文件）加载图标，其他机器加载失败回退 SystemIcons.Application（换电脑实测暴露） | v2.2.2：新增 `LoadAppIcon()` 用 `Icon.ExtractAssociatedIcon(Application.ExecutablePath)` 从 exe 内嵌资源（/win32icon）提取，窗口/托盘/标题栏图标全部改用；已验证 Release exe 内嵌图标存在（32x32 提取成功） |
+| D5 | v2.3.0 加「dsh 版本」输入框后，提示文字手工定位到 x=150，超出对话框右边界（340 宽的固定对话框） | 移到 x=24 左对齐并缩短文案；同时把"控件在客户区内 + 两两不重叠"做成程序化断言，之后再加字段会被自动拦住 |
+| D6 | 端到端测试最初漏了鉴权细节：`?token=` 是 303 + 下发 cookie，用 .NET 默认请求（无 CookieContainer）跟随重定向时不带 cookie → 误判为 token 无效 | 测试里加 `CookieContainer` 以模拟浏览器行为；裸访问的断言也从"必须 404"放宽为"任何非 200 都算被拒"（实测 0.1.5 返回 401 而非 404） |
 
 ## 未覆盖项（GUI 手动操作）
 
@@ -75,5 +85,6 @@
 - 一键诊断弹窗与复制按钮
 - 一键安装流程（本机环境齐全，未实际触发下载安装；代码路径与下载源已静态审查）
 - 设置面板弹窗交互与端口变更时"服务重启"提示
+- v2.3.0「打开界面」在真实浏览器里点开（脚本已验证 URL 能被服务接受，但"浏览器被唤起"这步仍需人工确认）
 
 建议：发布后邀请 1-2 位无环境用户实测"一键安装"，重点验证便携 Node 下载（npmmirror/nodejs.org）与 npm 安装链路。
