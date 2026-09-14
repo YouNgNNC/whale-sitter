@@ -58,6 +58,8 @@ Produces `whale-sitter.exe` next to the sources. Only needs the csc.exe that shi
 - Stop: `taskkill /F /T` on the listening PID
 - Settings are stored in `HKCU\Software\whale-sitter`
 - Service log: `%AppData%\npm\dsh-web.log`
+- Open UI: dsh **0.1.5 and later** guard the app with a per-boot access token (an anonymous request gets 401/404). The tool reads the newest boot's token out of the service log and appends it to the URL; older dsh versions print no token, so the plain URL is used
+- Install/repair version: the settings panel can pin a dsh version. Left empty, a **repair reinstalls the version already installed** instead of quietly upgrading, and only a fresh install takes the latest. Every install logs `dsh version: old -> new`
 
 ## Files
 
@@ -71,6 +73,7 @@ Produces `whale-sitter.exe` next to the sources. Only needs the csc.exe that shi
 
 ## Changelog
 
+- **v2.3.0**: Adapt to dsh 0.1.5+ UI authentication — "Open UI" now carries the per-boot token (opening the plain URL against a new dsh shows 401/404); the HTTP health probe reports both the anonymous and the tokenised status; "Install / Fix" no longer silently changes the dsh version (a repair reinstalls the current one, or pin a version in Settings) and warns when the version changed so locally patched files can be re-applied; the diagnostics report gained the dsh version and UI-auth state, and redacts access tokens so it stays safe to paste into a public issue
 - **v2.2.2**: Fix window/tray icons showing as the default icon on other machines (runtime icons are now extracted from the exe's own embedded resource instead of depending on a machine-local `%AppData%\npm\dsh-web.ico` file)
 - **v2.2.1**: Fix "Install / Fix" failing on machines without a portable Node (npm is a .cmd on Windows and can't be launched directly as a process; now executed via cmd.exe, and npm-cli.js is located from the node.exe path first)
 - **v2.2.0**: "Install / Fix" always visible (panel button + tray menu; acts as repair/reinstall when the environment is complete); stops the service before installing to avoid file locks; can repair using the system npm
