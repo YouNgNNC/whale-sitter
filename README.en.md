@@ -9,7 +9,7 @@
 - 🧰 **One-click install / fix**: detects Node.js / dsh automatically; if missing, one click downloads and installs a portable Node.js (no admin rights) and dsh. When the environment is complete it doubles as "repair & reinstall" (always available via the panel button and tray menu)
 - 🩺 **One-click diagnostics**: generates an environment report (versions/paths/port/HTTP/log tail) and copies it to the clipboard — paste it into a GitHub issue for help
 - 🧠 **Smart status**: distinguishes "Node.js not found" / "dsh not installed" / "port in use" / "running / stopped" and switches the action button accordingly
-- 🟢 **Status light**: polls the dsh web service every 2 s; green = running (shows PID), red = stopped; breathing animation while running
+- 🟢 **Status light**: polls the dsh web service every 2 s in-process (10 s while minimized to tray); green = running (shows PID), red = stopped; breathing animation while running
 - 🎛️ **One-click switch**: a big button to start/stop (also available in the tray menu)
 - 🐳 **System tray**: closing the window minimizes to tray instead of exiting; double-click the whale icon to restore
 - 🚀 **Auto-start**: starts the service automatically when the panel opens, if it isn't running
@@ -54,7 +54,7 @@ Produces `whale-sitter.exe` next to the sources. Only needs the csc.exe that shi
 
 - Locates the dsh install via `npm prefix -g` (or the bundled portable Node)
 - Service process = `node <npm-global>\node_modules\@deepseek-ai\dsh\lib\bin.js web --port <port>`
-- Status detection: `netstat` checks whether the configured port is LISTENING
+- Status detection: in-process `GetExtendedTcpTable` looks up the PID listening on the configured port (falls back to `netstat` only if the API fails)
 - Stop: `taskkill /F /T` on the listening PID
 - Settings are stored in `HKCU\Software\whale-sitter`
 - Service log: `%AppData%\npm\dsh-web.log`
@@ -73,6 +73,7 @@ Produces `whale-sitter.exe` next to the sources. Only needs the csc.exe that shi
 
 ## Changelog
 
+- **v2.4.0**: Performance fix — status polling no longer blocks the UI thread with child processes (`netstat` / `npm prefix` / `node --version` were the main freeze source). Port/PID lookup is now in-process via `GetExtendedTcpTable` (netstat only as fallback); path/version results are cached and refreshed after install; polling runs on a background thread with re-entrancy guard; 2 s while the panel is visible, 10 s in tray (pulse animation off when hidden); fixed `Tick` handlers stacking on every tray→panel restore
 - **v2.3.0**: Adapt to dsh 0.1.5+ UI authentication — "Open UI" now carries the per-boot token (opening the plain URL against a new dsh shows 401/404); the HTTP health probe reports both the anonymous and the tokenised status; "Install / Fix" no longer silently changes the dsh version (a repair reinstalls the current one, or pin a version in Settings) and warns when the version changed so locally patched files can be re-applied; the diagnostics report gained the dsh version and UI-auth state, and redacts access tokens so it stays safe to paste into a public issue
 - **v2.2.2**: Fix window/tray icons showing as the default icon on other machines (runtime icons are now extracted from the exe's own embedded resource instead of depending on a machine-local `%AppData%\npm\dsh-web.ico` file)
 - **v2.2.1**: Fix "Install / Fix" failing on machines without a portable Node (npm is a .cmd on Windows and can't be launched directly as a process; now executed via cmd.exe, and npm-cli.js is located from the node.exe path first)

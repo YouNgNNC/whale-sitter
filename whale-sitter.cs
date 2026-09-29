@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -17,7 +17,7 @@ namespace WhaleSitter
 {
     internal static class Program
     {
-        public const string Version = "2.3.0";
+        public const string Version = "2.5.0";
 
         [STAThread]
         private static void Main()
@@ -192,10 +192,29 @@ namespace WhaleSitter
         private static readonly string LocalDataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "whale-sitter");
         private static string PortableNodeDir = FindPortableNodeDir();
+        private static string npmDirCache;
+        private static string nodeVersionCache;
 
         private static string NpmDir
         {
-            get { return PortableNodeDir != null ? PortableNodeDir : ResolveNpmPrefix(); }
+            get
+            {
+                if (PortableNodeDir != null) return PortableNodeDir;
+                if (npmDirCache == null) npmDirCache = ResolveNpmPrefix();
+                return npmDirCache;
+            }
+        }
+
+        /// <summary>
+        /// Drop path/version caches after an install so the next probe sees the
+        /// new tree. NpmDir / NodeVersionText used to spawn processes on every
+        /// property access; they are now resolved once and only refreshed here.
+        /// </summary>
+        private static void RefreshPathCaches()
+        {
+            PortableNodeDir = FindPortableNodeDir();
+            npmDirCache = null;
+            nodeVersionCache = null;
         }
 
         private static string DshEntry
@@ -236,6 +255,8 @@ namespace WhaleSitter
         private bool running;
         private bool pulseOn;
         private bool installInProgress;
+        private bool pollBusy;
+        private int lastPid = -1;
         private int lastPort;
         private Palette pal;
 
@@ -246,6 +267,12 @@ namespace WhaleSitter
             lastPort = Settings.Port;
             InitUi();
             InitTray();
+            // Wire timers once. OnShown used to re-subscribe Tick on every
+            // tray→panel restore, stacking handlers and multiplying work.
+            pollTimer.Interval = 2000;
+            pollTimer.Tick += delegate { OnPollTick(); };
+            pulseTimer.Interval = 600;
+            pulseTimer.Tick += delegate { OnPulseTick(); };
         }
 
         private static void ApplyLanguage()
@@ -309,11 +336,14 @@ namespace WhaleSitter
 
         private static bool NodeAvailable()
         {
-            return PortableNodeDir != null || NodeVersionText() != L.Get("未检测到", "not found");
+            if (PortableNodeDir != null) return true;
+            if (nodeVersionCache != null) return true;
+            return NodeVersionText() != L.Get("未检测到", "not found");
         }
 
         private static string NodeVersionText()
         {
+            if (nodeVersionCache != null) return nodeVersionCache;
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo(NodeExe, "--version");
@@ -323,7 +353,12 @@ namespace WhaleSitter
                 Process p = Process.Start(psi);
                 string v = p.StandardOutput.ReadToEnd().Trim();
                 p.WaitForExit(3000);
-                return v.Length > 0 ? v : L.Get("未检测到", "not found");
+                if (v.Length > 0)
+                {
+                    nodeVersionCache = v;
+                    return v;
+                }
+                return L.Get("未检测到", "not found");
             }
             catch { return L.Get("未检测到", "not found"); }
         }
@@ -709,8 +744,20 @@ namespace WhaleSitter
             trayMenu.Items[3].Text = L.Get("一键诊断", "Diagnose");
             trayMenu.Items[4].Text = L.Get("设置", "Settings");
             trayMenu.Items[5].Text = L.Get("一键安装 / 修复环境", "Install / Fix Environment");
-            trayMenu.Items[7].Text = L.Get("启动服务", "Start Service");
-            trayMenu.Items[8].Text = L.Get("停止服务", "Stop Service");
+            if (running)
+            {
+                trayMenu.Items[7].Enabled = false;
+                trayMenu.Items[7].Text = L.Get("启动服务（运行中）", "Start Service (Running)");
+                trayMenu.Items[8].Enabled = true;
+                trayMenu.Items[8].Text = L.Get("● 停止服务", "● Stop Service");
+            }
+            else
+            {
+                trayMenu.Items[7].Enabled = true;
+                trayMenu.Items[7].Text = L.Get("● 启动服务", "● Start Service");
+                trayMenu.Items[8].Enabled = false;
+                trayMenu.Items[8].Text = L.Get("停止服务（已停止）", "Stop Service (Stopped)");
+            }
             trayMenu.Items[10].Text = L.Get("退出", "Exit");
         }
 
@@ -718,7 +765,11 @@ namespace WhaleSitter
         {
             try
             {
-                if (File.Exists(LogPath)) Process.Start("notepad.exe", "\"" + LogPath + "\"");
+                if (File.Exists(LogPath))
+                {
+                    using (LogViewerForm f = new LogViewerForm(LogPath, pal))
+                        f.ShowDialog(this);
+                }
                 else MessageBox.Show(L.Get("日志文件还不存在：\n", "Log file not found:\n") + LogPath,
                     "whale-sitter", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -791,6 +842,25 @@ namespace WhaleSitter
             statusHint.ForeColor = pal.Warn;
         }
 
+        /// <summary>
+        /// Find the process name and PID that is listening on the configured
+        /// port, so the user gets a concrete hint instead of a bare error.
+        /// </summary>
+        private static string FindPortOccupant(int port)
+        {
+            int pid = FindPidByPort(port);
+            if (pid <= 0) return null;
+            try
+            {
+                Process p = Process.GetProcessById(pid);
+                return p.ProcessName + " (PID " + pid + ")";
+            }
+            catch
+            {
+                return "PID " + pid;
+            }
+        }
+
         private void UpdateStatusUi()
         {
             if (installInProgress)
@@ -824,6 +894,22 @@ namespace WhaleSitter
                 return;
             }
 
+            if (!DshInstalled() && running)
+            {
+                string occupant = FindPortOccupant(Settings.Port);
+                if (occupant != null)
+                {
+                    dot.ForeColor = pal.Warn;
+                    status.ForeColor = pal.Warn;
+                    status.Text = L.Get("端口被占用", "Port occupied");
+                    statusHint.Text = L.Get("端口 " + Settings.Port + " 被 " + occupant + " 占用",
+                        "Port " + Settings.Port + " is occupied by " + occupant);
+                    toggle.SetColors(pal.Warn, Color.White);
+                    toggle.Text = L.Get("点击停止占用进程", "Click to stop occupant");
+                    return;
+                }
+            }
+
             if (!DshInstalled())
             {
                 dot.ForeColor = pal.Warn;
@@ -842,7 +928,8 @@ namespace WhaleSitter
             {
                 dot.ForeColor = pulseOn ? pal.Success : pal.SuccessDim;
                 status.ForeColor = pal.Success;
-                status.Text = L.Get("运行中 · PID ", "Running · PID ") + runningPidText();
+                status.Text = L.Get("运行中 · PID ", "Running · PID ")
+                    + (lastPid > 0 ? lastPid.ToString() : "?");
                 toggle.SetColors(pal.Success, Color.White);
                 toggle.Text = L.Get("点击停止服务", "Click to stop");
             }
@@ -856,37 +943,93 @@ namespace WhaleSitter
             }
         }
 
-        private string runningPidText()
-        {
-            int pid = FindPidByPort(Settings.Port);
-            return pid > 0 ? pid.ToString() : "?";
-        }
-
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            pollTimer.Interval = 2000;
-            pollTimer.Tick += delegate { UpdateStatus(); };
-            pollTimer.Start();
-
-            pulseTimer.Interval = 600;
-            pulseTimer.Tick += delegate
-            {
-                if (running)
-                {
-                    pulseOn = !pulseOn;
-                    dot.ForeColor = pulseOn ? pal.Success : pal.SuccessDim;
-                }
-                else
-                {
-                    pulseOn = false;
-                }
-            };
-            pulseTimer.Start();
-
-            UpdateStatus();
+            ApplyPollCadence();
+            if (!pollTimer.Enabled) pollTimer.Start();
+            if (!pulseTimer.Enabled) pulseTimer.Start();
+            OnPollTick();
             if (NodeAvailable() && DshInstalled() && !running)
                 StartServer();
+            CheckForUpdates();
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (IsHandleCreated && pollTimer.Enabled) ApplyPollCadence();
+        }
+
+        /// <summary>
+        /// Poll fast while the panel is on screen; back off in the tray so a
+        /// hidden monitor stays quiet. Pulse is visual-only — stop it when
+        /// nothing can be seen blinking.
+        /// </summary>
+        private void ApplyPollCadence()
+        {
+            if (Visible)
+            {
+                pollTimer.Interval = 2000;
+                if (!pulseTimer.Enabled) pulseTimer.Start();
+            }
+            else
+            {
+                pollTimer.Interval = 10000;
+                pulseTimer.Stop();
+                pulseOn = false;
+            }
+        }
+
+        private void OnPulseTick()
+        {
+            if (!running)
+            {
+                pulseOn = false;
+                return;
+            }
+            pulseOn = !pulseOn;
+            dot.ForeColor = pulseOn ? pal.Success : pal.SuccessDim;
+        }
+
+        /// <summary>
+        /// Background status poll. Port lookup used to block the UI thread
+        /// (netstat + friends) every 2s; now it runs on a worker and only the
+        /// paint step returns to the UI thread. Re-entrant ticks are dropped
+        /// so a slow probe cannot pile up.
+        /// </summary>
+        private void OnPollTick()
+        {
+            if (pollBusy) return;
+            if (!IsHandleCreated || IsDisposed) return;
+            pollBusy = true;
+            int port = Settings.Port;
+            Task.Run(delegate
+            {
+                int pid = FindPidByPort(port);
+                try
+                {
+                    if (IsDisposed || !IsHandleCreated)
+                    {
+                        pollBusy = false;
+                        return;
+                    }
+                    BeginInvoke(new Action(delegate
+                    {
+                        pollBusy = false;
+                        lastPid = pid;
+                        running = pid > 0;
+                        starting = false;
+                        UpdateStatusUi();
+                        try { tray.Text = "whale-sitter - " + status.Text; }
+                        catch { }
+                    }));
+                }
+                catch
+                {
+                    pollBusy = false;
+                }
+            });
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -895,6 +1038,7 @@ namespace WhaleSitter
             {
                 e.Cancel = true;
                 Hide();
+                ApplyPollCadence();
                 tray.ShowBalloonTip(1500, "whale-sitter",
                     L.Get("已最小化到系统托盘，双击鲸鱼图标即可恢复面板。",
                         "Minimized to tray. Double-click the whale icon to restore."), ToolTipIcon.Info);
@@ -922,7 +1066,34 @@ namespace WhaleSitter
                 return;
             }
             if (running) StopServer();
-            else StartServer();
+            else
+            {
+                string occupant = FindPortOccupant(Settings.Port);
+                if (occupant != null)
+                {
+                    DialogResult r = MessageBox.Show(
+                        L.Get("端口 " + Settings.Port + " 被 " + occupant + " 占用。\n\n是否停止该进程？",
+                            "Port " + Settings.Port + " is occupied by " + occupant + ".\n\nStop this process?"),
+                        "whale-sitter", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                    if (r == DialogResult.Yes)
+                    {
+                        int pid = FindPidByPort(Settings.Port);
+                        if (pid > 0)
+                        {
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo("taskkill", "/F /T /PID " + pid)
+                                { UseShellExecute = false, CreateNoWindow = true });
+                            }
+                            catch { }
+                            Task.Delay(500).ContinueWith(delegate { StartServer(); });
+                            return;
+                        }
+                    }
+                    return;
+                }
+                StartServer();
+            }
         }
 
         private async void InstallAll()
@@ -935,40 +1106,43 @@ namespace WhaleSitter
                 bool wasRunning = running;
                 if (wasRunning)
                 {
+                    SetInstallUi(L.Get("步骤 1/4：停止服务…", "Step 1/4: Stopping service…"));
                     StopServer();
                     await Task.Delay(600);
                 }
+                RotateLog();
                 string versionBefore = InstalledDshVersion();
                 string nodeDir = PortableNodeDir;
                 if (nodeDir != null)
                 {
-                    SetInstallUi(L.Get("正在安装/修复 DeepSeek Harness（可能需要几分钟）…",
-                        "Installing/repairing DeepSeek Harness (may take a few minutes)…"));
+                    SetInstallUi(L.Get("步骤 2/4：安装 dsh（可能需要几分钟）…",
+                        "Step 2/4: Installing dsh (may take a few minutes)…"));
                     AppendLog("一键安装/修复：安装 dsh（便携 Node）");
                     await RunNpmInstallAsync(Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"), nodeDir);
                 }
                 else if (NodeAvailable())
                 {
-                    SetInstallUi(L.Get("正在安装/修复 DeepSeek Harness（可能需要几分钟）…",
-                        "Installing/repairing DeepSeek Harness (may take a few minutes)…"));
+                    SetInstallUi(L.Get("步骤 2/4：安装 dsh（可能需要几分钟）…",
+                        "Step 2/4: Installing dsh (may take a few minutes)…"));
                     AppendLog("一键安装/修复：安装 dsh（系统 Node）");
                     string npmCli = await ResolveSystemNpmCliAsync();
                     await RunNpmInstallAsync(npmCli, null);
                 }
                 else
                 {
-                    SetInstallUi(L.Get("正在下载 Node.js…", "Downloading Node.js…"));
+                    SetInstallUi(L.Get("步骤 2/4：下载 Node.js…", "Step 2/4: Downloading Node.js…"));
                     AppendLog("一键安装：下载 Node.js");
                     nodeDir = await InstallNodeAsync();
-                    SetInstallUi(L.Get("正在安装 DeepSeek Harness（可能需要几分钟）…",
-                        "Installing DeepSeek Harness (may take a few minutes)…"));
+                    SetInstallUi(L.Get("步骤 3/4：安装 dsh（可能需要几分钟）…",
+                        "Step 3/4: Installing dsh (may take a few minutes)…"));
                     AppendLog("一键安装：安装 dsh（便携 Node）");
                     await RunNpmInstallAsync(Path.Combine(nodeDir, "node_modules", "npm", "bin", "npm-cli.js"), nodeDir);
                     PortableNodeDir = FindPortableNodeDir();
                 }
 
+                RefreshPathCaches();
                 UpdateStatus();
-                SetInstallUi(L.Get("安装完成，正在启动服务…", "Installed. Starting service…"));
+                SetInstallUi(L.Get("步骤 4/4：启动服务…", "Step 4/4: Starting service…"));
                 if (!DshInstalled())
                     throw new Exception(L.Get("dsh 安装后仍未检测到，请查看日志或使用一键诊断。",
                         "dsh still not detected after install. Check the log or use Diagnose."));
@@ -995,6 +1169,7 @@ namespace WhaleSitter
             }
             finally
             {
+                RefreshPathCaches();
                 installInProgress = false;
                 UpdateStatusUi();
             }
@@ -1182,6 +1357,8 @@ namespace WhaleSitter
             if (!running && (serverProc == null || serverProc.HasExited)) return;
             status.Text = L.Get("正在停止…", "Stopping…");
             toggle.Text = L.Get("正在停止…", "Stopping…");
+            // Re-query: lastPid can be stale after an external kill/restart.
+            // The in-process table lookup is cheap (~1ms), so always refresh.
             int pid = FindPidByPort(Settings.Port);
             try
             {
@@ -1202,13 +1379,94 @@ namespace WhaleSitter
         private void UpdateStatus()
         {
             int pid = FindPidByPort(Settings.Port);
+            lastPid = pid;
             running = pid > 0;
             starting = false;
             UpdateStatusUi();
             tray.Text = "whale-sitter - " + status.Text;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MibTcpRowOwnerPid
+        {
+            public uint State;
+            public uint LocalAddr;
+            public uint LocalPort;
+            public uint RemoteAddr;
+            public uint RemotePort;
+            public uint OwningPid;
+        }
+
+        [DllImport("iphlpapi.dll", SetLastError = true)]
+        private static extern uint GetExtendedTcpTable(
+            IntPtr pTcpTable, ref int pdwSize, bool bOrder, int ulAf, int tableClass, int reserved);
+
+        private const int AfInet = 2;
+        private const int TcpTableOwnerPidListener = 3;
+
+        /// <summary>
+        /// Resolve the PID listening on <paramref name="port"/> in-process via
+        /// GetExtendedTcpTable. Replaces spawning netstat every 2s, which was
+        /// the main UI-freeze source. Falls back to netstat only if the API
+        /// call itself fails.
+        /// </summary>
         private static int FindPidByPort(int port)
+        {
+            int apiPid;
+            bool apiOk;
+            if (TryFindPidByPortApi(port, out apiPid, out apiOk) && apiOk)
+                return apiPid;
+            return FindPidByPortNetstat(port);
+        }
+
+        private static bool TryFindPidByPortApi(int port, out int pid, out bool apiOk)
+        {
+            pid = -1;
+            apiOk = false;
+            try
+            {
+                int size = 0;
+                GetExtendedTcpTable(IntPtr.Zero, ref size, false, AfInet, TcpTableOwnerPidListener, 0);
+                if (size <= 0) return false;
+
+                IntPtr buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    uint ret = GetExtendedTcpTable(buffer, ref size, false, AfInet, TcpTableOwnerPidListener, 0);
+                    if (ret != 0) return false;
+                    apiOk = true;
+
+                    int rowCount = Marshal.ReadInt32(buffer);
+                    IntPtr rowPtr = new IntPtr(buffer.ToInt64() + 4);
+                    int rowSize = Marshal.SizeOf(typeof(MibTcpRowOwnerPid));
+                    for (int i = 0; i < rowCount; i++)
+                    {
+                        MibTcpRowOwnerPid row = (MibTcpRowOwnerPid)Marshal.PtrToStructure(
+                            rowPtr, typeof(MibTcpRowOwnerPid));
+                        // LocalPort is network byte order in the low 16 bits.
+                        int localPort = (int)((row.LocalPort & 0xFF) << 8)
+                            | (int)((row.LocalPort >> 8) & 0xFF);
+                        if (localPort == port)
+                        {
+                            pid = (int)row.OwningPid;
+                            return true;
+                        }
+                        rowPtr = new IntPtr(rowPtr.ToInt64() + rowSize);
+                    }
+                    return true;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int FindPidByPortNetstat(int port)
         {
             try
             {
@@ -1263,6 +1521,7 @@ namespace WhaleSitter
                     {
                         lastPort = Settings.Port;
                         bool wasRunning = running;
+                        lastPid = -1;
                         if (wasRunning) StopServer();
                         SetInstallUi(L.Get("端口已修改，服务将重启。", "Port changed, service will restart."));
                         UpdateStatusUi();
@@ -1412,8 +1671,36 @@ namespace WhaleSitter
                 catch { }
             };
 
+            Button save = new Button();
+            save.Text = L.Get("保存为文件", "Save to File");
+            save.FlatStyle = FlatStyle.Flat;
+            save.BackColor = pal.BtnBg;
+            save.ForeColor = pal.BtnText;
+            save.Dock = DockStyle.Bottom;
+            save.Height = 36;
+            save.Click += delegate
+            {
+                try
+                {
+                    SaveFileDialog sfd = new SaveFileDialog();
+                    sfd.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*";
+                    sfd.FileName = "whale-sitter-diag-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt";
+                    if (sfd.ShowDialog(f) == DialogResult.OK)
+                    {
+                        File.WriteAllText(sfd.FileName, report);
+                        MessageBox.Show(L.Get("报告已保存到：\n", "Report saved to:\n") + sfd.FileName,
+                            "whale-sitter");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(L.Get("保存失败：", "Save failed: ") + ex.Message, "whale-sitter");
+                }
+            };
+
             f.Controls.Add(box);
             f.Controls.Add(copy);
+            f.Controls.Add(save);
             f.ShowDialog(this);
         }
 
@@ -1428,6 +1715,195 @@ namespace WhaleSitter
                 }
                 catch { }
             }
+        }
+
+        /// <summary>
+        /// Rotate the service log before install/repair so a long-running log
+        /// cannot grow without bound. Keeps the 3 most recent rotations.
+        /// </summary>
+        private static void RotateLog()
+        {
+            try
+            {
+                if (!File.Exists(LogPath)) return;
+                for (int i = 3; i >= 1; i--)
+                {
+                    string src = i == 1 ? LogPath : LogPath + "." + (i - 1);
+                    string dst = LogPath + "." + i;
+                    if (File.Exists(src))
+                    {
+                        if (File.Exists(dst)) File.Delete(dst);
+                        File.Move(src, dst);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Check GitHub Releases for a newer version. Silent on failure.
+        /// </summary>
+        private async void CheckForUpdates()
+        {
+            try
+            {
+                using (WebClient wc = new WebClient())
+                {
+                    wc.Headers.Add("User-Agent", "whale-sitter");
+                    string json = await wc.DownloadStringTaskAsync(
+                        "https://api.github.com/repos/YouNgNNC/whale-sitter/releases/latest");
+                    Match m = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"v?([^\"]+)\"");
+                    if (!m.Success) return;
+                    string latest = m.Groups[1].Value;
+                    if (IsNewerVersion(latest, Program.Version))
+                    {
+                        tray.ShowBalloonTip(3000, "whale-sitter",
+                            L.Get("发现新版本 v" + latest + "，请前往 GitHub Releases 下载。",
+                                "New version v" + latest + " available. Visit GitHub Releases to download."),
+                            ToolTipIcon.Info);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static bool IsNewerVersion(string a, string b)
+        {
+            try
+            {
+                string[] pa = a.Split('.');
+                string[] pb = b.Split('.');
+                for (int i = 0; i < 3 && i < pa.Length && i < pb.Length; i++)
+                {
+                    int va, vb;
+                    if (!int.TryParse(pa[i].Split('-')[0], out va)) return false;
+                    if (!int.TryParse(pb[i].Split('-')[0], out vb)) return false;
+                    if (va > vb) return true;
+                    if (va < vb) return false;
+                }
+            }
+            catch { }
+            return false;
+        }
+    }
+
+    internal class LogViewerForm : Form
+    {
+        private readonly string logPath;
+        private readonly Palette pal;
+        private readonly RichTextBox box = new RichTextBox();
+        private readonly TextBox filterBox = new TextBox();
+        private readonly CheckBox autoScroll = new CheckBox();
+        private readonly System.Windows.Forms.Timer refreshTimer = new System.Windows.Forms.Timer();
+
+        public LogViewerForm(string path, Palette p)
+        {
+            logPath = path;
+            pal = p;
+            InitUi();
+            LoadLog();
+            refreshTimer.Interval = 2000;
+            refreshTimer.Tick += delegate { if (autoScroll.Checked) LoadLog(); };
+            refreshTimer.Start();
+        }
+
+        private void InitUi()
+        {
+            Text = L.Get("dsh 服务日志", "dsh Service Log");
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(700, 450);
+            MinimumSize = new Size(500, 300);
+            Font = new Font("Microsoft YaHei UI", 9F);
+            BackColor = pal.WindowBg;
+            ForeColor = pal.Text;
+
+            filterBox.Location = new Point(12, 10);
+            filterBox.Size = new Size(250, 24);
+            filterBox.TextChanged += delegate { LoadLog(); };
+            filterBox.BackColor = pal.CardBg;
+            filterBox.ForeColor = pal.Text;
+
+            autoScroll.Text = L.Get("自动滚动", "Auto-scroll");
+            autoScroll.Location = new Point(270, 10);
+            autoScroll.AutoSize = true;
+            autoScroll.Checked = true;
+
+            box.Location = new Point(12, 40);
+            box.Size = new Size(676, 370);
+            box.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            box.ReadOnly = true;
+            box.BackColor = pal.CardBg;
+            box.ForeColor = pal.Text;
+            box.Font = new Font("Consolas", 9F);
+            box.WordWrap = false;
+
+            Button copyBtn = new Button();
+            copyBtn.Text = L.Get("复制全部", "Copy All");
+            copyBtn.Location = new Point(12, 415);
+            copyBtn.Size = new Size(100, 28);
+            copyBtn.FlatStyle = FlatStyle.Flat;
+            copyBtn.BackColor = pal.BtnBg;
+            copyBtn.ForeColor = pal.BtnText;
+            copyBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            copyBtn.Click += delegate
+            {
+                try { Clipboard.SetText(box.Text); } catch { }
+            };
+
+            Button refreshBtn = new Button();
+            refreshBtn.Text = L.Get("刷新", "Refresh");
+            refreshBtn.Location = new Point(120, 415);
+            refreshBtn.Size = new Size(100, 28);
+            refreshBtn.FlatStyle = FlatStyle.Flat;
+            refreshBtn.BackColor = pal.BtnBg;
+            refreshBtn.ForeColor = pal.BtnText;
+            refreshBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            refreshBtn.Click += delegate { LoadLog(); };
+
+            Controls.Add(filterBox);
+            Controls.Add(autoScroll);
+            Controls.Add(box);
+            Controls.Add(copyBtn);
+            Controls.Add(refreshBtn);
+        }
+
+        private void LoadLog()
+        {
+            try
+            {
+                if (!File.Exists(logPath)) return;
+                string[] lines = File.ReadAllLines(logPath);
+                string filter = filterBox.Text.Trim();
+                box.Clear();
+                foreach (string line in lines)
+                {
+                    if (filter.Length > 0 && line.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    string redacted = Regex.Replace(line, "(\\?token=)[A-Za-z0-9_\\-]+", "$1<redacted>");
+                    if (redacted.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        redacted.IndexOf("fatal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        redacted.IndexOf("crash", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        box.SelectionColor = Color.FromArgb(232, 110, 110);
+                    }
+                    else if (redacted.IndexOf("warn", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        box.SelectionColor = Color.FromArgb(240, 170, 70);
+                    }
+                    else
+                    {
+                        box.SelectionColor = pal.Text;
+                    }
+                    box.AppendText(redacted + "\n");
+                }
+                if (autoScroll.Checked) box.SelectionStart = box.TextLength;
+            }
+            catch { }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            refreshTimer.Stop();
+            base.OnFormClosing(e);
         }
     }
 

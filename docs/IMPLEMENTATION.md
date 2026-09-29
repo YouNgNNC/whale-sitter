@@ -34,7 +34,7 @@ MainForm（主窗体 404×268，FixedSingle）
 
 | 功能 | 实现方式 |
 |---|---|
-| 状态检测 | 每 2 秒跑 `netstat -ano -p tcp`，解析 `:3080` + `LISTENING` 行的 PID |
+| 状态检测 | 后台线程轮询：进程内 `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_LISTENER)` 取监听端口 PID（失败回退 netstat）；UI 线程只做控件刷新；面板 2s / 托盘 10s |
 | 启动服务 | `node <npm全局目录>\node_modules\@deepseek-ai\dsh\lib\bin.js web`，stdout/stderr 重定向写入日志 |
 | 停止服务 | `taskkill /F /T /PID <监听3080的PID>`（找不到则杀自己启动的进程） |
 | 自动拉起 | 窗体 OnShown 时若环境齐且未运行则自动 StartServer |
@@ -43,6 +43,7 @@ MainForm（主窗体 404×268，FixedSingle）
 | 开机自启 | 读写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 值 `whale-sitter`（免管理员） |
 | 一键安装 | 见下节 |
 | 一键诊断 | 收集系统/Node/npm 目录/dsh 入口/端口/HTTP/日志末尾 → 弹窗文本框 + 复制按钮 |
+| 路径缓存 | `NpmDir` / `NodeVersionText` 首次解析后缓存；安装完成 `RefreshPathCaches()` 失效。避免属性 getter 每次 spawn `npm prefix -g` / `node --version` |
 
 ### 一键安装流程
 
@@ -124,6 +125,8 @@ git push --force-with-lease origin main
 | 「安装/修复」固定跑未钉版本的 `npm install -g @deepseek-ai/dsh`，会静默升级到 latest 并整包覆盖（v2.3.0 适配） | `InstallSpec()`：设置面板指定版本优先；留空时修复＝重装**当前已装版本**（从包 manifest 读），只有全新安装取最新。版本变化写日志并提示包内本地补丁需重新应用 |
 | 诊断报告要贴公开 issue，但新版日志里带访问 token（v2.3.0 适配） | `RedactToken()` 把 `?token=…` 替换为 `?token=<redacted>`，报告里的日志末尾整体过一遍 |
 | 手工像素坐标加控件容易越界/重叠（v2.3.0 加版本输入框时真撞过一次） | 程序化布局检查：构造 `SettingsForm` 不显示，断言控件都在客户区内且两两不相交 |
+| 每 2s 在 UI 线程 `Process.Start(netstat)` + `runningPidText()` 再跑一次，系统 Node 时 `NpmDir` getter 还会反复 `cmd /c npm prefix -g`（v2.4.0 修复） | 端口 PID 改 `GetExtendedTcpTable` 进程内查询；路径/版本缓存；轮询 `Task.Run` + `BeginInvoke`；托盘 10s；修掉 OnShown 重复 `Tick +=` |
+| 从托盘恢复面板时 `OnShown` 再次 `pollTimer.Tick +=`，Hide/Show 多次会叠加订阅（v2.4.0 修复） | Tick 只在 MainForm 构造函数接线一次 |
 
 ## 6. 本机运行验证（v1.0.0）
 
